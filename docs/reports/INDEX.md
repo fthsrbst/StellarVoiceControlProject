@@ -1,36 +1,37 @@
-# docs/reports/ — Araştırma Arşivi
+# docs/reports/ — Research Archive
 
-> Proje ile ilgili tüm araştırmalar burada **arşiv mantığında** düzenli depolanır.
-> Model geçmiş bilgiye ihtiyaç duyduğunda bu klasörde **arama yapar** (grep/regex).
+> All project-related research is stored here in an **archive fashion**.
+> When the model needs past information, it **searches this directory** (grep/regex).
+> All reports are written in **English**.
 >
-> Dosya adı formatı: `YYYY-MM-DD-<konu-kebab-case>.md`
-> Her rapor bu INDEX'e tek satırla işlenir.
+> File naming format: `YYYY-MM-DD-<topic-kebab-case>.md`
+> Every report is registered as a single line in this INDEX.
 
-## Rapor İndeksi
+## Report Index
 
-| Tarih | Konu | Yazar/Agent | Dosya | Anahtar Kelimeler |
+| Date | Topic | Author/Agent | File | Keywords |
 |---|---|---|---|---|
-| — | (henüz rapor yok) | — | — | — |
+| — | (no reports yet) | — | — | — |
 
 ---
 
-## Rapor Şablonu
+## Report Template
 
 ```markdown
-# <Konu>
-- **Tarih:** YYYY-MM-DD
-- **Yazar/Agent:** <isim>
-- **Anahtar kelimeler:** <virgülle ayrılmış>
+# <Topic>
+- **Date:** YYYY-MM-DD
+- **Author/Agent:** <name>
+- **Keywords:** <comma-separated>
 
-## Özet
+## Summary
 ...
 
-## Bulgular
+## Findings
 ...
 
-## Kaynaklar
+## Sources
 - ...
 
-## Projeye Etkisi / Öneriler
+## Impact on Project / Recommendations
 ...
 ```

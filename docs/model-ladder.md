@@ -1,54 +1,55 @@
-# Model Merdiveni — Worker Sıralaması ve Kullanım Yöntemleri
+# Model Ladder — Worker Ranking & Usage Methods
 
-> Bu dosya, koordinatörün görev dağıtırken **hangi worker'ı seçeceğini** tanımlar.
-> Koordinatör her görev dağıtımından önce bu dosyayı okur (lazy loading).
-> Model isimleri ortama göre güncellenir; mantık sabittir: **görev zorluğuna göre en düşük yeterli seviye kullanılır.**
+> This file defines **which worker the coordinator selects** when assigning tasks.
+> The coordinator reads this file before every task assignment (lazy loading).
+> Model names are updated per environment; the logic is fixed: **use the lowest sufficient level for the task's difficulty.**
+> This document is written in **English** like all project documentation.
 
 ---
 
-## Merdiven (yukarıdan aşağıya)
+## The Ladder (top to bottom)
 
-| Seviye | Rol | Tipik Model Sınıfı | Kullanım |
+| Level | Role | Typical Model Class | Usage |
 |---|---|---|---|
-| L0 | Koordinatör (ana model) | En güçlü model | Sadece koordinasyon; kod/dosya okuma-yazma YAPMAZ |
-| L1 | Senior Worker | Güçlü model | Mimari kararlar, karmaşık implementasyon, zor debug, PR review (kritik) |
-| L2 | Mid Worker | Orta model | Standart feature geliştirme, test yazımı, refactor, dokümantasyon |
-| L3 | Junior Worker | Hafif/hızlı model | Basit dosya işlemleri, formatlama, grep/arama, rapor derleme, boilerplate |
-| L4 | Reviewer | Görev kritikliğine göre L1/L2 | PR review; kodu yazan worker ile aynı agent OLAMAZ |
+| L0 | Coordinator (primary model) | Strongest model | Coordination only; does NOT read/write code or files |
+| L1 | Senior Worker | Strong model | Architecture decisions, complex implementation, hard debugging, PR review (critical) |
+| L2 | Mid Worker | Medium model | Standard feature development, test writing, refactoring, documentation |
+| L3 | Junior Worker | Light/fast model | Simple file operations, formatting, grep/search, report compilation, boilerplate |
+| L4 | Reviewer | L1/L2 depending on task criticality | PR review; can NEVER be the same agent as the code author |
 
 ---
 
-## Kullanım Yöntemleri
+## Usage Methods
 
-### 1. Görev → Seviye Eşleştirmesi
-- Görevi al → zorluğunu sınıflandır (trivial / standart / karmaşık) → **en düşük yeterli seviyeyi** seç.
-- Pahalı modeli basit işte kullanma; hafif modeli kritik işte kullanma.
+### 1. Task → Level Mapping
+- Take the task → classify difficulty (trivial / standard / complex) → select the **lowest sufficient level**.
+- Don't burn an expensive model on trivial work; don't risk critical work on a light model.
 
-### 2. Paralel Dağıtım
-- Bağımsız görevler aynı anda farklı worktree'lerde farklı workerlara verilir.
-- Aynı dosya kapsamına dokunan iki görev asla paralelleştirilmez (sıraya alınır).
+### 2. Parallel Assignment
+- Independent tasks are assigned simultaneously to different workers in different worktrees.
+- Two tasks touching the same file scope are never parallelized (they are queued).
 
-### 3. Eskalasyon
-- Worker takılırsa veya işi bitiremezse: raporunu `backlog/` altına düşer → koordinatör işi bir üst seviyeye eskale eder.
-- Eskalasyon zinciri: L3 → L2 → L1. L1 çözemezse koordinatör kullanıcıya danışır.
+### 3. Escalation
+- If a worker gets stuck or cannot finish: it files its report under `backlog/` → the coordinator escalates the task one level up.
+- Escalation chain: L3 → L2 → L1. If L1 cannot solve it, the coordinator consults the user.
 
-### 4. Review Eşleştirmesi
-- Kritik modül PR'ı → L1 reviewer. Standart PR → L2 reviewer.
-- Reviewer ile yazar asla aynı worktree/agent değildir.
+### 4. Review Pairing
+- Critical module PR → L1 reviewer. Standard PR → L2 reviewer.
+- Reviewer and author are never the same worktree/agent.
 
-### 5. Sub-Agent Raporlama
-- Her seviyedeki worker/sub-agent, görev sonunda raporunu `backlog/` klasörüne yazar (şablon: `backlog.md`).
+### 5. Sub-Agent Reporting
+- Workers/sub-agents at every level write their reports to the `backlog/` directory upon task completion (template: `backlog.md`).
 
 ---
 
-## Model Eşleştirme Tablosu (ortama göre doldurulur)
+## Model Assignment Table (filled per environment)
 
-| Seviye | Kullanılacak Model | Not |
+| Level | Model to Use | Notes |
 |---|---|---|
-| L0 | (ana model — bu oturum) | Koordinatör |
-| L1 | <doldurulacak> | |
-| L2 | <doldurulacak> | |
-| L3 | <doldurulacak> | |
-| L4 | <doldurulacak> | |
+| L0 | (primary model — this session) | Coordinator |
+| L1 | <to be filled> | |
+| L2 | <to be filled> | |
+| L3 | <to be filled> | |
+| L4 | <to be filled> | |
 
-> Ortamdaki kullanılabilir modeller netleştiğinde bu tablo güncellenir.
+> This table is updated once the models available in the environment are finalized.

@@ -1,38 +1,39 @@
-# sprints.md — Milestone & Sprint Takibi
+# sprints.md — Milestone & Sprint Tracking
 
-> Milestone'lar ve checklist'ler burada yaşar. Koordinatör görev önceliklendirirken bu dosyayı okur.
-> Her milestone altında tamamlanma kriterleri (Definition of Done) checklist olarak tutulur.
-> Kısa sürede yüksek kalite hedefiyle: az milestone, net kriter, sık review.
-
----
-
-## Milestone 0 — Proje Altyapısı ✅
-- [x] CLAUDE.md / AGENTS.md anayasası
-- [x] notes.md (fikir hafızası)
-- [x] backlog.md + backlog/ rapor sistemi
-- [x] docs/reports/ araştırma arşivi
-- [x] docs/model-ladder.md worker merdiveni
-- [x] sprints.md milestone takibi
-
-## Milestone 1 — Konu & Mimari Kararı 🔲
-> Sahip: araştırma ekibi — sonuçlar `docs/reports/` altına düşer.
-- [ ] Proje konusu netleşti (rapor: docs/reports/)
-- [ ] Teknik mimari kararı verildi (rapor: docs/reports/)
-- [ ] Teknoloji stack'i seçildi
-- [ ] Repo iskeleti oluşturuldu
-- [ ] model-ladder.md model tablosu dolduruldu
-
-## Milestone 2 — Çekirdek Özellik (MVP) 🔲
-- [ ] (konu netleşince doldurulacak)
-
-## Milestone 3 — Entegrasyon & Cila 🔲
-- [ ] (konu netleşince doldurulacak)
-
-## Milestone 4 — Teslim / Sunum 🔲
-- [ ] (konu netleşince doldurulacak)
+> Milestones and checklists live here. The coordinator reads this file when prioritizing tasks.
+> Under each milestone, completion criteria (Definition of Done) are kept as a checklist.
+> High quality in a short time frame: few milestones, clear criteria, frequent reviews.
+> All entries are written in **English**.
 
 ---
 
-### Notlar
-- Her checklist maddesi tamamlandığında tarih + PR linki ile işaretlenir: `[x] (2026-09-19, PR #12)`
-- Milestone tamamlanma kriteri: tüm checklist ✅ + tüm PR'lar review'dan geçmiş + açık backlog kaydı yok.
+## Milestone 0 — Project Infrastructure ✅
+- [x] CLAUDE.md / AGENTS.md constitution
+- [x] notes.md (idea memory)
+- [x] backlog.md + backlog/ report system
+- [x] docs/reports/ research archive
+- [x] docs/model-ladder.md worker ladder
+- [x] sprints.md milestone tracking
+
+## Milestone 1 — Topic & Architecture Decision 🔲
+> Owner: research team — results land in `docs/reports/`.
+- [ ] Project topic finalized (report: docs/reports/)
+- [ ] Technical architecture decision made (report: docs/reports/)
+- [ ] Technology stack selected
+- [ ] Repository skeleton created
+- [ ] model-ladder.md model table filled in
+
+## Milestone 2 — Core Feature (MVP) 🔲
+- [ ] (to be filled once the topic is finalized)
+
+## Milestone 3 — Integration & Polish 🔲
+- [ ] (to be filled once the topic is finalized)
+
+## Milestone 4 — Delivery / Presentation 🔲
+- [ ] (to be filled once the topic is finalized)
+
+---
+
+### Notes
+- Each completed checklist item is marked with date + PR link: `[x] (2026-09-19, PR #12)`
+- Milestone completion criteria: all checklist items ✅ + all PRs reviewed + no open backlog entries.

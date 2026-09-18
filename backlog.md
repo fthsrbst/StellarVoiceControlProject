@@ -1,47 +1,48 @@
-# backlog.md — Yarım Kalan İşler Ana İndeksi
+# backlog.md — Master Index of Unfinished Work
 
-> Bu dosya, **yarım kalan / devredilen tüm işlerin ana indeksidir.**
-> Her worker ve sub-agent, bitiremediği işi `backlog/<task-adı>.md` dosyasına detaylı rapor olarak yazar
-> ve buraya tek satırlık kayıt ekler. **Amaç: hiçbir işi asla kaçırmamak.**
+> This file is the **master index of all unfinished / handed-off work.**
+> Every worker and sub-agent writes unfinished work as a detailed report in `backlog/<task-name>.md`
+> and adds a single-line entry here. **Goal: never lose track of any task.**
+> All entries and reports are written in **English**.
 >
-> İndeks satır formatı:
-> `| Tarih | Görev | Worker/Agent | Durum | Rapor | Öncelik |`
+> Index row format:
+> `| Date | Task | Worker/Agent | Status | Report | Priority |`
 
-## Açık İşler
+## Open Tasks
 
-| Tarih | Görev | Worker/Agent | Durum | Rapor | Öncelik |
+| Date | Task | Worker/Agent | Status | Report | Priority |
 |---|---|---|---|---|---|
-| — | (henüz açık iş yok) | — | — | — | — |
+| — | (no open tasks yet) | — | — | — | — |
 
-## Tamamlanan İşler (Arşiv)
+## Completed Tasks (Archive)
 
-| Tarih | Görev | Worker/Agent | Kapatan | Rapor |
+| Date | Task | Worker/Agent | Closed By | Report |
 |---|---|---|---|---|
 | — | — | — | — | — |
 
 ---
 
-## Alt Rapor Şablonu — `backlog/<task-adı>.md`
+## Sub-Report Template — `backlog/<task-name>.md`
 
 ```markdown
-# Rapor: <task-adı>
-- **Tarih:** YYYY-MM-DD
-- **Worker/Agent:** <isim/model>
+# Report: <task-name>
+- **Date:** YYYY-MM-DD
+- **Worker/Agent:** <name/model>
 - **Branch/Worktree:** <branch>
-- **PR:** <link veya "yok">
+- **PR:** <link or "none">
 
-## Yapılanlar
+## Completed
 - ...
 
-## Yarım Kalanlar (devredilen)
+## Unfinished (handed off)
 - ...
 
-## Bloklayıcılar
+## Blockers
 - ...
 
-## Review Notları
+## Review Notes
 - ...
 
-## Sonraki Adım Önerisi
+## Suggested Next Step
 - ...
 ```

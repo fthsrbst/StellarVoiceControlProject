@@ -1,10 +1,11 @@
-# backlog/ — Worker & Sub-Agent Raporları
+# backlog/ — Worker & Sub-Agent Reports
 
-Bu klasör, tüm worker ve sub-agent'ların **iş raporlarını** tutar.
+This directory holds **work reports** from all workers and sub-agents.
 
-- Her yarım kalan (veya devredilen) iş için `backlog/<task-adı>.md` dosyası oluşturulur.
-- Şablon için kökteki `backlog.md` dosyasındaki "Alt Rapor Şablonu" bölümüne bak.
-- Her rapor, kök `backlog.md` indeksine tek satırla işlenir.
-- Sub-agent raporları da burada tutulur; dosya adı `sub-<agent>-<task>.md` formatındadır.
+- For every unfinished (or handed-off) task, a `backlog/<task-name>.md` file is created.
+- For the template, see the "Sub-Report Template" section in the root `backlog.md`.
+- Every report is registered as a single line in the root `backlog.md` index.
+- Sub-agent reports are also kept here; file naming: `sub-<agent>-<task>.md`.
+- All reports are written in **English**.
 
-> Kural: Rapor yazılmamış iş, "bitmiş" sayılmaz.
+> Rule: A task without a report is not considered "done."

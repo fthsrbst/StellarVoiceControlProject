@@ -1,23 +1,26 @@
-# notes.md — Fikir & Tartışma Notları
+# notes.md — Idea & Discussion Notes
 
-> Bu dosya projenin hafızasıdır. Akla gelen **her fikir**, yapılan **her tartışma** buraya tarihli not olarak düşülür.
-> **Hiçbir not, fikir veya karar unutulmaz / silinmez.** Karar değişirse eski not üstü çizilmeden altına güncelleme eklenir.
+> This file is the project's memory. **Every idea** that comes up and **every discussion** held is recorded here as a dated note.
+> **No note, idea, or decision is ever forgotten or deleted.** If a decision changes, an update is appended below the old note without striking it through.
+> All notes are written in **English**, regardless of the conversation language.
 >
 > Format:
 > ```
-> ## YYYY-MM-DD — <Konu Başlığı>
-> - **Fikir:** ...
-> - **Tartışma:** ...
-> - **Karar:** (varsa) ...
-> - **Durum:** [açık | kararlaştı | rafa kalktı]
+> ## YYYY-MM-DD — <Topic Title>
+> - **Idea:** ...
+> - **Discussion:** ...
+> - **Decision:** (if any) ...
+> - **Status:** [open | decided | shelved]
 > ```
 
 ---
 
-## 2026-09-19 — Proje Başlangıcı
-- **Fikir:** Proje altyapısı kuruldu: CLAUDE.md/AGENTS.md anayasası, backlog sistemi, rapor arşivi, model merdiveni, sprint takibi.
-- **Karar:** Ana model koordinatör; tüm icra paralel workerlarda. Worktree + PR + zorunlu review. Tüm uzun işlemlerde caffeinate.
-- **Not:** Proje konusu, mimari ve teknik araştırma başka bir ekip üyesi tarafından yürütülüyor; sonuçlar `docs/reports/` altına düşecek.
-- **Durum:** kararlaştı
+## 2026-09-19 — Project Bootstrap
+- **Idea:** Project infrastructure set up: CLAUDE.md/AGENTS.md constitution, backlog system, report archive, model ladder, sprint tracking.
+- **Decision:** Primary model acts as coordinator; all execution happens in parallel workers. Worktree + PR + mandatory review. Caffeinate for all long-running operations.
+- **Decision:** Single-repo model — origin = `n0tnow/StellarVoiceControlProject` (shared repo), fork = personal backup only.
+- **Decision:** All documentation is written in English, even when prompts/conversations are in Turkish.
+- **Note:** Project topic, architecture, and technical research are being handled by another team member; results will land in `docs/reports/`.
+- **Status:** decided
 
-<!-- Yeni notlar buradan itibaren en üste değil, kronolojik olarak alta eklenir. -->
+<!-- New notes are appended chronologically at the bottom. -->

@@ -1,115 +1,117 @@
-# CLAUDE.md — Proje Anayasası
+# CLAUDE.md — Project Constitution
 
-> ⚠️ **SENKRONİZASYON KURALI:** Bu dosya `AGENTS.md` ile birebir senkrondur.
-> Bu dosyada yapılan HER değişiklik `AGENTS.md`'ye de uygulanmalıdır (ve tersi).
-> İki dosya asla farklı içerikte kalmamalıdır.
+> ⚠️ **SYNC RULE:** This file is kept strictly in sync with `AGENTS.md`.
+> EVERY change made here must also be applied to `AGENTS.md` (and vice versa).
+> The two files must never diverge in content.
 
----
-
-## 1. Ana Modelin Rolü: KOORDİNATÖR
-
-Ana model (sen) bu projede **kod yazmaz, kod okumaz, dosya okumaz.** Ana modelin tek işi koordinasyondur:
-
-- İşleri parçalara böl ve worker agentlara dağıt.
-- Worker çıktılarını topla, review sürecini yönet, merge kararlarını ver.
-- Workerlar arası çakışmayı önle (dosya/worktree ayrımı).
-- `backlog.md`, `sprints.md`, `notes.md` güncellemelerini denetle.
-
-**Kod yazma, kod okuma, dosya okuma, araştırma, test çalıştırma → WORKER işidir.**
-Ana model sadece workerlara net, kendi kendine yeten (self-contained) görev tanımları yazar.
+> 🌐 **LANGUAGE RULE:** All project documentation, code comments, commit messages, PR descriptions, backlog reports, research reports, and notes are written in **English** — regardless of the language used in prompts/conversations. Prompts may be in Turkish; output artifacts are always English.
 
 ---
 
-## 2. Paralel Agent Mimarisi
+## 1. Primary Model's Role: COORDINATOR
 
-- Bu projede genelde **paralel agentlarla** çalışılır.
-- Her worker **kendi git worktree'sinde** çalışır. İki agent asla aynı worktree'de çalışmaz → kimse kimseyi bloklamaz.
-- Her worker işini bitirince kendi branch'inden **PR açar**. Merge sadece PR + review üzerinden olur.
-- Ana model, paralel iş başlatırken her worker'a çakışmayan dosya kapsamı (scope) verir.
+The primary model (you) **does not write code, read code, or read files** in this project. Its sole job is coordination:
 
-### Worktree Kuralı
+- Break work into pieces and distribute to worker agents.
+- Collect worker outputs, manage the review process, make merge decisions.
+- Prevent conflicts between workers (file/worktree separation).
+- Supervise updates to `backlog.md`, `sprints.md`, `notes.md`.
+
+**Writing code, reading code, reading files, researching, running tests → WORKER's job.**
+The primary model only writes clear, self-contained task definitions for workers.
+
+---
+
+## 2. Parallel Agent Architecture
+
+- Work is generally done with **parallel agents** in this project.
+- Each worker operates in **its own git worktree**. Two agents never work in the same worktree → nobody blocks anybody.
+- When a worker finishes, it opens a **PR** from its own branch. Merges happen only via PR + review.
+- When launching parallel work, the primary model assigns each worker a non-overlapping file scope.
+
+### Worktree Rule
 ```bash
-# Her yeni paralel iş için:
-git worktree add .worktrees/<task-adı> -b <branch-adı>
-# Worker sadece bu dizinde çalışır.
-# PR merge edilince worktree temizlenir:
-git worktree remove .worktrees/<task-adı>
+# For every new parallel task:
+git worktree add .worktrees/<task-name> -b <branch-name>
+# The worker operates only in this directory.
+# After the PR is merged, the worktree is cleaned up:
+git worktree remove .worktrees/<task-name>
 ```
 
-### Remote Yapısı (Tek Repo)
-- **origin** = `n0tnow/StellarVoiceControlProject` — ortak ana repo. Tüm branch'ler, worktree'ler ve PR'lar burada.
-- **fork** = `fthsrbst/StellarVoiceControlProject` — kişisel yedek/vitrin; aktif geliştirmede kullanılmaz, ara ara origin ile senkronlanır.
-- Fork'a PR açılmaz; tüm PR'lar origin üzerinde branch'ten main'e gider.
+### Remote Structure (Single Repo)
+- **origin** = `n0tnow/StellarVoiceControlProject` — the shared main repo. All branches, worktrees, and PRs live here.
+- **fork** = `fthsrbst/StellarVoiceControlProject` — personal backup/showcase; not used in active development, synced with origin occasionally.
+- No PRs are opened to the fork; all PRs go from branch to main on origin.
 
 ---
 
-## 3. Review Zorunluluğu
+## 3. Mandatory Review
 
-**Her adımda detaylı review vardır.** Düzgün kod = düzgün proje.
+**Every step involves detailed review.** Clean code = clean project.
 
-- Hiçbir PR review edilmeden merge edilmez.
-- Review için ayrı bir worker (reviewer) görevlendirilir; kodu yazan worker kendi kodunu review edemez.
-- Review kriterleri: doğruluk, okunabilirlik, testler, güvenlik, proje konvansiyonlarına uyum.
-- Review sonucu (onay/red + gerekçe) `backlog/` altındaki ilgili rapora işlenir.
+- No PR is merged without review.
+- A separate worker (reviewer) is assigned for review; the worker who wrote the code cannot review its own code.
+- Review criteria: correctness, readability, tests, security, adherence to project conventions.
+- The review outcome (approval/rejection + rationale) is recorded in the relevant report under `backlog/`.
 
 ---
 
-## 4. Caffeinate Kuralı
+## 4. Caffeinate Rule
 
-- Tüm uzun süren işlemlerde agentlar **`caffeinate`** kullanır.
-- Build, test, uzun script, uzun worker görevleri `caffeinate -i` ile sarılır:
+- Agents use **`caffeinate`** for all long-running operations.
+- Builds, tests, long scripts, long worker tasks are wrapped with `caffeinate -i`:
 ```bash
-caffeinate -i <komut>
+caffeinate -i <command>
 ```
-- Ana model, workera verdiği görev tanımında uzun komutlar için caffeinate kullanımını şart koşar.
+- The primary model mandates caffeinate usage for long commands in task definitions given to workers.
 
 ---
 
-## 5. Lazy Loading — Doküman Erişim Haritası
+## 5. Lazy Loading — Document Access Map
 
-Ana modelin context'ini boğmamak için detaylar ayrı dosyalarda tutulur.
-**Agent ihtiyaç duyduğunda ilgili dosyayı okur; hepsini önceden yüklemez.**
+To avoid bloating the primary model's context, details are kept in separate files.
+**Agents read the relevant file only when needed; nothing is preloaded.**
 
-| Dosya | Ne zaman okunur |
+| File | When to read |
 |---|---|
-| `notes.md` | Fikir/tartışma geçmişi gerektiğinde; yeni fikir eklenirken |
-| `backlog.md` + `backlog/` | Yarım kalan iş sorgulandığında; worker raporu düşülürken |
-| `docs/reports/` | Araştırma/arşiv bilgisi gerektiğinde (arama yapılabilir) |
-| `docs/model-ladder.md` | Worker seçilirken — **her görev dağıtımından önce okunur** |
-| `sprints.md` | Milestone/checklist takibi; görev önceliklendirme |
+| `notes.md` | When idea/discussion history is needed; when adding a new idea |
+| `backlog.md` + `backlog/` | When querying unfinished work; when filing worker reports |
+| `docs/reports/` | When research/archive information is needed (searchable) |
+| `docs/model-ladder.md` | When selecting a worker — **read before every task assignment** |
+| `sprints.md` | Milestone/checklist tracking; task prioritization |
 
-> ✅ Önemli kuralların tamamı bu dosyada (CLAUDE.md) yaşar. Diğer dosyalar detay/veri taşır, kural taşımaz.
-
----
-
-## 6. Dokümantasyon Görevleri (Her Agent İçin)
-
-- **Hiçbir fikir kaybolmaz:** Tartışılan her fikir `notes.md`'ye tarihli not olarak düşülür.
-- **Hiçbir iş kaçmaz:** Yarım kalan her iş, worker/sub-agent tarafından `backlog/<task>.md` raporuyla belgelenir ve `backlog.md` indeksine eklenir.
-- **Her araştırma arşivlenir:** Araştırma çıktıları `docs/reports/` altına tarihli dosya olarak konur ve `docs/reports/INDEX.md`'ye işlenir.
-- Worker görevini bitirirken her zaman: durum raporu + kalan işler + açılan PR linki döner.
+> ✅ All important rules live in this file (CLAUDE.md). Other files carry details/data, not rules.
 
 ---
 
-## 7. Git & GitHub Disiplini
+## 6. Documentation Duties (For Every Agent)
 
-- **Commit sürekli atılır:** Her anlamlı küçük değişiklik kendi commit'idir. Büyük tek commit yok; atomik, açıklayıcı commit mesajları (conventional commits önerilir: `feat:`, `fix:`, `docs:`, `refactor:`).
-- **Push düzenli yapılır:** Worker branch'i sık push'lanır; iş asla sadece lokalde kalmaz.
-- **Dokümanlar sürekli güncel tutulur:** Kod değişen her PR'da ilgili `.md` dosyaları da güncellenir (notes/backlog/sprints/reports). Doküman güncellemesi "sonra yapılacak iş" değil, PR'ın parçasıdır.
-- **Dokümantasyon için paralel agent açılabilir:** Sub-agent konusunda kısıtımız yok. Ana tur bittiğinde, o turun doküman güncellemeleri (notes.md, backlog raporları, docs/reports/ arşivi, sprints.md checklist) için **paralel dokümantasyon agentı** açılması teşvik edilir — ana akış bloklanmaz.
-- **GitHub aktif kullanılır:** PR açıklamaları dolu yazılır (ne/neden/nasıl test edildi), issue varsa PR'a bağlanır, review yorumları PR üzerinden yürür.
-
----
-
-## 8. İletişim ve Görev Formatı
-
-Workera verilen her görev şunları içerir:
-1. **Amaç** — ne, neden yapılıyor
-2. **Kapsam** — hangi dosyalar/dizinler (başka dosyaya dokunma)
-3. **Worktree/branch adı**
-4. **Kabul kriterleri** — nasıl test edilecek
-5. **Rapor formatı** — backlog raporu nereye yazılacak
+- **No idea is lost:** Every discussed idea is recorded in `notes.md` as a dated note.
+- **No task is dropped:** Every unfinished task is documented by the worker/sub-agent in a `backlog/<task>.md` report and added to the `backlog.md` index.
+- **Every research effort is archived:** Research outputs are placed under `docs/reports/` as dated files and registered in `docs/reports/INDEX.md`.
+- When finishing, a worker always returns: status report + remaining work + the PR link opened.
 
 ---
 
-*Son güncelleme: 2026-09-19*
+## 7. Git & GitHub Discipline
+
+- **Commits are made continuously:** Every meaningful small change is its own commit. No giant single commits; atomic, descriptive commit messages (conventional commits recommended: `feat:`, `fix:`, `docs:`, `refactor:`).
+- **Pushes happen regularly:** Worker branches are pushed frequently; work never stays local only.
+- **Docs are kept continuously up to date:** In every PR that changes code, the related `.md` files are also updated (notes/backlog/sprints/reports). Documentation updates are part of the PR, not "work for later."
+- **Parallel agents may be spawned for documentation:** We have no sub-agent constraints. After a main round finishes, spawning a **parallel documentation agent** for that round's doc updates (notes.md, backlog reports, docs/reports/ archive, sprints.md checklist) is encouraged — the main flow is not blocked.
+- **GitHub is used actively:** PR descriptions are written in full (what/why/how tested), linked to issues when they exist, and review comments happen on the PR.
+
+---
+
+## 8. Communication & Task Format
+
+Every task given to a worker includes:
+1. **Objective** — what and why
+2. **Scope** — which files/directories (touch nothing else)
+3. **Worktree/branch name**
+4. **Acceptance criteria** — how it will be tested
+5. **Report format** — where the backlog report will be written
+
+---
+
+*Last updated: 2026-09-19*
