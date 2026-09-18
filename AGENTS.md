@@ -36,6 +36,11 @@ git worktree add .worktrees/<task-adı> -b <branch-adı>
 git worktree remove .worktrees/<task-adı>
 ```
 
+### Remote Yapısı (Tek Repo)
+- **origin** = `n0tnow/StellarVoiceControlProject` — ortak ana repo. Tüm branch'ler, worktree'ler ve PR'lar burada.
+- **fork** = `fthsrbst/StellarVoiceControlProject` — kişisel yedek/vitrin; aktif geliştirmede kullanılmaz, ara ara origin ile senkronlanır.
+- Fork'a PR açılmaz; tüm PR'lar origin üzerinde branch'ten main'e gider.
+
 ---
 
 ## 3. Review Zorunluluğu
