@@ -52,4 +52,18 @@
   6. **Conflict avoidance:** As per constitution, parallel work stays in separate worktrees/branches with non-overlapping file scopes; rebase onto `main` before requesting review if the branch has drifted.
 - **Status:** decided
 
+## 2026-09-19 — Research: Genesis prior-art + Raven/Stellar feasibility (two reports archived)
+- **Idea:** Two research reports completed and archived in `docs/reports/` (registered in `docs/reports/INDEX.md`): `2026-09-19-raven-stellar-feasibility.md` and `2026-09-19-hackathon-prior-art.md`.
+- **Findings (Raven / Stellar feasibility):**
+  - Raven is SDF-operated; canonical endpoint is now `raven.stellar.org` (both hosts work). OAuth PKCE + dynamic client registration accepts a loopback redirect → ~2–4h Tauri integration, or the `npx mcp-remote` sidecar.
+  - LumenLoop MCP is no longer auth-free (WorkOS OAuth), so it is not a simpler fallback; Scout MCP (stdio) has no auth.
+  - Mock anchor is live and the treasury is funded (~26.6k USDC). SEP-6 `/sep6/info` shows 0.5–300 vs the guide's 50–3000 units — discrepancy must be reconciled. SEP-38 uses `sell_asset`/`buy_asset`.
+  - Both Soroswap and DeFindex SDKs require API keys → protocol integration is cuttable.
+- **Findings (prior art / hackathon reality check):**
+  - Prior art is crowded except voice-first: no voice-first build found in 1,348 indexed Stellar hackathon builds (search-based evidence). SpendGuard ≈ `polaris_guard` concept; Verbex ≈ conversation-to-DeFi; MPP was the previous hackathon's theme.
+  - Recommended MVP: voice → anchor TRY→USDC → guard-routed payment → Touch ID → explorer link + one deliberate on-chain over-limit rejection. Ordered cut list: P2P, dev mode, screen control, notch polish, MPP, premium TTS, passkeys.
+  - Reconcile/verify the 20 Sep 12:00 deadline and shortlist criteria with organizers.
+- **Follow-ups (docs):** `docs/architecture.md` facts to correct: Raven ownership/canonical host, `skills.*` family missing from the MCP catalog list, LumenLoop auth, Scout tool count, SEP-38 field names, SEP-6 amount units.
+- **Status:** open (follow-ups: deadline/criteria verification, architecture.md corrections)
+
 <!-- New notes are appended chronologically at the bottom. -->
