@@ -60,3 +60,6 @@ captures/
 .claude/settings.local.json
 tmp/
 .tmp/
+
+# Local user notes (machine setup, personal info; never committed)
+LOCAL.md

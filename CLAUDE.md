@@ -8,6 +8,12 @@
 
 ---
 
+## Local notes
+
+`LOCAL.md` (gitignored) holds user-specific information: machine setup, personal context, local paths. If it exists, read it at session start. Nothing user-specific goes into committed files.
+
+---
+
 ## 1. Primary Model's Role: COORDINATOR
 
 The primary model (you) **does not write code, read code, or read files** in this project. Its sole job is coordination:
