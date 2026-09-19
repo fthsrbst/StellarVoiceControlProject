@@ -21,7 +21,7 @@
 - [x] Technical architecture decision made (2026-09-19: docs/architecture.md, registered in docs/reports/INDEX.md)
 - [x] Technology stack selected (2026-09-19: Tauri v2 + Rust core + React/TS/Vite + Tailwind + shadcn/ui)
 - [ ] Repository skeleton created
-- [ ] model-ladder.md model table filled in
+- [x] model-ladder.md model table filled in (2026-09-19: table + PONG log filled; file is local-only and never committed, see .gitignore)
 
 ## Milestone 2 — Vertical Slice 🔲
 > Goal: voice → agent → one real testnet transaction. Deadline: today (hackathon crunch, ~6h blocks).
