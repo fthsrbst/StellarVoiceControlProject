@@ -23,14 +23,28 @@
 - [ ] Repository skeleton created
 - [ ] model-ladder.md model table filled in
 
-## Milestone 2 — Core Feature (MVP) 🔲
-- [ ] (to be filled once the topic is finalized)
+## Milestone 2 — Vertical Slice 🔲
+> Goal: voice → agent → one real testnet transaction. Deadline: today (hackathon crunch, ~6h blocks).
+- [ ] docs/interfaces.md agreed by both owners (types: Intent, ChainTool, SigningService, PolarisEvent)
+- [ ] Tauri spike: global hotkey + mic capture + Touch ID + Keychain read (Tauri vs Electron decision lands here)
+- [ ] Repository skeleton: app/, agent/, stellar/, contracts/ + CI-less build scripts
+- [ ] Voice pipeline: hotkey press/release → STT → agent loop → spoken/displayed answer
+- [ ] Chain tool: "send 10 USDC to <alias>" returns unsigned XDR + decoded summary
+- [ ] Touch ID approval card → signed XDR → testnet tx confirmed (SLICE COMPLETE)
 
-## Milestone 3 — Integration & Polish 🔲
-- [ ] (to be filled once the topic is finalized)
+## Milestone 3 — Chain & Guard 🔲
+- [ ] polaris_guard Soroban contract: per-tx/daily spending limit + alias book; deployed on testnet, contract ID documented
+- [ ] Anchor flow: SEP-10/38/6 TRY mock deposit → USDC balance, driven by voice
+- [ ] Protocol integration: Soroswap swap OR DeFindex vault (pick ONE via testnet spike, do not attempt both)
+- [ ] Approval card UI polished (Stellar Design System / shadcn), explorer links on card
+- [ ] (optional if time) MPP pay-per-command session
 
 ## Milestone 4 — Delivery / Presentation 🔲
-- [ ] (to be filled once the topic is finalized)
+> Deadline: 20 Sep 12:00. Bonuses (passkey wallet, P2P escrow, developer mode) ONLY after M4 items are done.
+- [ ] README refreshed to reflect current codebase (constitution requirement)
+- [ ] Demo video recorded + pitch deck
+- [ ] Docs synced: notes.md, backlog reports, docs/reports/INDEX.md, sprints.md all up to date
+- [ ] (bonus, if everything above is done) passkey wallet / P2P escrow / developer mode
 
 ---
 
