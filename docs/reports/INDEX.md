@@ -11,7 +11,7 @@
 
 | Date | Topic | Author/Agent | File | Keywords |
 |---|---|---|---|---|
-| — | (no reports yet) | — | — | — |
+| 2026-09-19 | Polaris architecture & tech-stack decision | research team | [docs/architecture.md](../architecture.md) | tauri, electron, touch-id, keychain, soroban, react, mpp, sep-6, hackathon |
 
 ---
 
