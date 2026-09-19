@@ -15,11 +15,11 @@
 - [x] docs/model-ladder.md worker ladder
 - [x] sprints.md milestone tracking
 
-## Milestone 1 — Topic & Architecture Decision 🔲
+## Milestone 1 — Topic & Architecture Decision ✅
 > Owner: research team — results land in `docs/reports/`.
-- [ ] Project topic finalized (report: docs/reports/)
-- [ ] Technical architecture decision made (report: docs/reports/)
-- [ ] Technology stack selected
+- [x] Project topic finalized (2026-09-19: Polaris — see docs/architecture.md §1)
+- [x] Technical architecture decision made (2026-09-19: docs/architecture.md, registered in docs/reports/INDEX.md)
+- [x] Technology stack selected (2026-09-19: Tauri v2 + Rust core + React/TS/Vite + Tailwind + shadcn/ui)
 - [ ] Repository skeleton created
 - [ ] model-ladder.md model table filled in
 
