@@ -90,6 +90,7 @@ To avoid bloating the primary model's context, details are kept in separate file
 - **No task is dropped:** Every unfinished task is documented by the worker/sub-agent in a `backlog/<task>.md` report and added to the `backlog.md` index.
 - **Every research effort is archived:** Research outputs are placed under `docs/reports/` as dated files and registered in `docs/reports/INDEX.md`.
 - When finishing, a worker always returns: status report + remaining work + the PR link opened.
+- **README is refreshed every milestone:** At the end of each milestone, a dedicated agent updates `README.md` to reflect the current codebase (what it does, architecture, setup, usage). README is never left stale.
 
 ---
 
