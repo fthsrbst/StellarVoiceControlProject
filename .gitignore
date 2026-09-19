@@ -63,16 +63,10 @@ tmp/
 
 # Local user notes (machine setup, personal info; never committed)
 LOCAL.md
-# ─────────────────────────────────────────────────────────────
-# Project workflow (see CLAUDE.md, worktree rule)
-# ─────────────────────────────────────────────────────────────
-.worktrees/
-.claude/settings.local.json
-tmp/
-.tmp/
 
 # Model ladder is LOCAL-ONLY: environment-specific model assignments are
-# user/machine specific and must never be committed. File is kept on disk
-# via `git rm --cached`; see docs/reports/ for committed test evidence.
+# user/machine specific and must never be committed. The file is kept on
+# disk only (removed from the index via `git rm --cached`); its PONG test
+# evidence lives in the local file itself, not in the repo.
 docs/model-ladder.md
 
