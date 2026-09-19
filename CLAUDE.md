@@ -83,7 +83,7 @@ To avoid bloating the primary model's context, details are kept in separate file
 | `notes.md` | When idea/discussion history is needed; when adding a new idea |
 | `backlog.md` + `backlog/` | When querying unfinished work; when filing worker reports |
 | `docs/reports/` | When research/archive information is needed (searchable) |
-| `docs/model-ladder.md` | When selecting a worker — **read before every task assignment** |
+| `docs/model-ladder.md` (local-only, never committed) | When selecting a worker — **read before every task assignment** (if present on disk) |
 | `sprints.md` | Milestone/checklist tracking; task prioritization |
 
 > ✅ All important rules live in this file (CLAUDE.md). Other files carry details/data, not rules.

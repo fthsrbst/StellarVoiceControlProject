@@ -63,3 +63,10 @@ tmp/
 
 # Local user notes (machine setup, personal info; never committed)
 LOCAL.md
+
+# Model ladder is LOCAL-ONLY: environment-specific model assignments are
+# user/machine specific and must never be committed. The file is kept on
+# disk only (removed from the index via `git rm --cached`); its PONG test
+# evidence lives in the local file itself, not in the repo.
+docs/model-ladder.md
+
