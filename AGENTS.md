@@ -119,6 +119,32 @@ Every task given to a worker includes:
 4. **Acceptance criteria** — how it will be tested
 5. **Report format** — where the backlog report will be written
 
+## 9. Versioning & Commit Cadence
+
+### Semantic versioning (code)
+- When code lands: add a root `VERSION` file + `CHANGELOG.md`; tag each release `vMAJOR.MINOR.PATCH` (SemVer).
+- Pre-1.0 policy: `v0.x.y` — bump MINOR for features, PATCH for fixes, once per milestone. The coordinator cuts tags after merge; agents never tag.
+
+### Commit cadence (agents)
+- **Commit after every completed logical step** (atomic, single-topic) — never on a timer or fixed interval. One logical change = one commit.
+- **Push at the end of every task/session** — work never stays local-only, even if unfinished (push the branch, not `main`).
+- **`main` is PR-only:** no direct commits to `main`. Merge = PR (squash) + review, per the async review workflow.
+
+### `main` sync (agents)
+- **Pull/rebase at task start:** every agent runs `git pull origin main` (and rebases its branch onto `main`) before starting any work.
+- Agents on separate clones / separate machines follow the exact same rule; work is never shared by manual file copying.
+
+### When real-time coordination IS required
+Routine commits/pushes/PRs need **no** face-to-face or chat coordination — the PR is the async channel. Notify the other person (face-to-face or DM) only for:
+1. **Scope change** — work outside the assigned file scope,
+2. **Merge conflicts** — deciding which side wins,
+3. **Milestone completion** — version tag + README refresh,
+4. **Touching files** another agent/person is actively working on.
+
+### Local-only files
+- `.gitignore`-d files (`LOCAL.md`, `docs/model-ladder.md`, …) are never committed; every clone keeps its own copy.
+- `.gitignore` itself must stay **identical across all clones** — a differing `.gitignore` is a bug, fix it via PR.
+
 ---
 
 *Last updated: 2026-09-19*

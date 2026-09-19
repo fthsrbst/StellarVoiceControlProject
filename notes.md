@@ -66,4 +66,15 @@
 - **Follow-ups (docs):** `docs/architecture.md` facts to correct: Raven ownership/canonical host, `skills.*` family missing from the MCP catalog list, LumenLoop auth, Scout tool count, SEP-38 field names, SEP-6 amount units.
 - **Status:** open (follow-ups: deadline/criteria verification, architecture.md corrections)
 
+## 2026-09-19 — Versioning & Commit Cadence (agent workflow)
+- **Idea:** Make the version-control usage explicit for agents: commit/push intervals, when to update `main`, and when real-time coordination between the two collaborators is needed.
+- **Decision:** Documented as §9 in AGENTS.md/CLAUDE.md:
+  1. **Commit** after every completed logical step (atomic, single-topic) — no timer-based commits.
+  2. **Push** the working branch at the end of every task/session; work never stays local-only.
+  3. **`main` is PR-only** (squash-merge per the async review decision); every agent pulls/rebases `main` at task start.
+  4. **SemVer starts when code lands:** root `VERSION` + `CHANGELOG.md`, `v0.x.y` tags per milestone (MINOR = feature, PATCH = fix); coordinator cuts tags, agents never tag.
+  5. **No real-time coordination for routine commits/pushes** — face-to-face/DM only for scope changes, merge conflicts, milestone completion, or touching files someone else is actively editing.
+  6. `.gitignore`-d files stay clone-local; `.gitignore` itself must be identical across all clones.
+- **Status:** decided
+
 <!-- New notes are appended chronologically at the bottom. -->
