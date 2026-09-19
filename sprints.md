@@ -32,6 +32,41 @@
 - [ ] Chain tool: "send 10 USDC to <alias>" returns unsigned XDR + decoded summary
 - [ ] Touch ID approval card → signed XDR → testnet tx confirmed (SLICE COMPLETE)
 
+### M2 — Owner A Track: Voice Pipeline, step-by-step 🔲
+> Rule: **one feature at a time, no skipping.** Do not start step N+1 until step N's
+> acceptance test passes and is demoed. Each step is its own branch + PR + review.
+
+#### A0 — Test harness 🔲
+- [ ] Minimal Tauri window: a "record" button (or hotkey) + a text log pane.
+- [ ] Purpose: every later step is tested by hand through this harness, no CLI hacks.
+- **Accept:** app runs, audio captured to a file, log pane prints events.
+
+#### A1 — STT (speech → text) 🔲
+- [ ] Model choice (decide, record in notes.md): local `whisper.cpp` (Metal) first; cloud API fallback only if quality fails.
+- [ ] Wire: captured audio → STT → transcript into the log pane.
+- **Accept:** speak 5 different commands, all transcribe correctly, <2s latency on release.
+
+#### A2 — LLM roundtrip (text → agent → response) 🔲
+- [ ] Agent core (Claude tool-use) receives transcript, returns a structured answer to the log pane.
+- [ ] First tool (mock, not chain): `noop` tool call proving tool-use works end to end.
+- **Accept:** "what is Soroban?" gets a sensible answer; a tool-invoking request shows the tool call + result in the log.
+
+#### A3 — TTS (response → speech) 🔲
+- [ ] Model choice (decide, record in notes.md): macOS system voice (AVSpeechSynthesizer / `say`) first — free, instant; premium voice only if pitch demo needs it.
+- [ ] Wire: agent answer → spoken output, with a mute toggle in the harness.
+- **Accept:** full loop hands-free: hold hotkey → speak → hear answer. Latency budget noted.
+
+#### A4 — Computer use (screen awareness) 🔲
+- [ ] Rust side: screenshot capture command exposed to the agent.
+- [ ] Agent tool: "describe screen / read this error" uses the screenshot.
+- **Accept:** with a Stellar Lab page open, voice query "what does this error say" returns the on-screen error text.
+
+#### A5 — Wire to real chain tool (merge point with Owner B) 🔲
+- [ ] Replace A2's mock tool with Owner B's real `ChainTool` (Intent → unsigned XDR + summary).
+- [ ] Approval card + Touch ID gate → signed → testnet tx (M2 slice complete).
+- **Accept:** "send 10 USDC to <alias>" end-to-end, Touch ID approved, tx visible on explorer.
+
+
 ## Milestone 3 — Chain & Guard 🔲
 - [ ] polaris_guard Soroban contract: per-tx/daily spending limit + alias book; deployed on testnet, contract ID documented
 - [ ] Anchor flow: SEP-10/38/6 TRY mock deposit → USDC balance, driven by voice
