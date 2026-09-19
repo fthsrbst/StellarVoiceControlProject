@@ -22,11 +22,10 @@
 - **Decision:** All documentation is written in English, even when prompts/conversations are in Turkish.
 - **Note:** Project topic, architecture, and technical research are being handled by another team member; results will land in `docs/reports/`.
 - **Status:** decided
+
 ## 2026-09-19 — Architecture Decision (Polaris)
 - **Idea:** Desktop app architecture for the Stellar Pro Hackathon (Genesis track, deadline 20 Sep 12:00).
 - **Decision:** Full decision recorded in `docs/architecture.md` (registered in `docs/reports/INDEX.md`). Tauri v2 shell with thin Rust core (hotkey, audio/screen capture, Keychain + Touch ID custody) + TypeScript/React (Vite, Tailwind, shadcn/ui) webview; decision is spike-gated with Electron fallback. Soroban contract `polaris_guard` enforces spending policy on testnet.
 - **Status:** decided
-
-<!-- New notes are appended chronologically at the bottom. -->
 
 <!-- New notes are appended chronologically at the bottom. -->
