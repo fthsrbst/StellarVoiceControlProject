@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use crate::types::{Intent, TxSummary};
+use crate::types::{CaptureStatus, Intent, TxSummary};
 
 /// Channel name; `app/src/lib/polaris.ts` listens on the same string.
 pub const POLARIS_EVENT_NAME: &str = "polaris-event";
@@ -31,6 +31,20 @@ pub enum AgentStage {
     Done,
 }
 
+/// Whether Polaris is currently producing audible speech (step A5).
+///
+/// This is driven by the actual blocking playback, not by the request: the
+/// backend fires a playback-start callback the moment audio really begins (step
+/// A9 — synthesis time is not "Speaking"), and the `speak` command emits `Idle`
+/// only once playback has finished (or failed), so the notch can never be left
+/// stuck showing "Speaking".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeechState {
+    Speaking,
+    Idle,
+}
+
 /// Everything the shell pushes to the UI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")]
@@ -38,13 +52,41 @@ pub enum PolarisEvent {
     Hotkey {
         state: HotkeyState,
     },
+    /// Accessibility trust for the modifier-only Control+Option gesture (step
+    /// A0 follow-up). `trusted: false` disables that gesture by design and
+    /// leaves the Control+Option+Space shortcut as the only trigger.
+    HotkeyPermission {
+        trusted: bool,
+    },
+    /// Full capture snapshot on every transition (step A0). The UI's overlay is
+    /// driven from this alone, so it must be emitted on *every* state change.
+    CaptureStatus {
+        status: CaptureStatus,
+    },
+    /// Raw "a WAV landed on disk" fact, emitted once per successful capture.
+    /// Kept separate from `capture_status` so step A1 can subscribe to the
+    /// artifact without re-deriving it from the lifecycle.
+    AudioCaptured {
+        path: String,
+        duration_ms: u64,
+    },
     Transcript {
         text: String,
         /// `final` is a Rust keyword; serde strips the `r#` and emits "final".
         r#final: bool,
+        /// The language the audio was recognized as, as a BCP-47 tag (step A12),
+        /// or `null` when the backend could not report it. It is measured from
+        /// the audio and is the authoritative signal for the reply language and
+        /// the TTS voice — never the model's own guess.
+        language: Option<String>,
     },
     AgentStatus {
         stage: AgentStage,
+    },
+    /// Audible-playback lifecycle (step A5). The overlay keeps the expanded
+    /// "Speaking" state up between these two events.
+    SpeechStatus {
+        state: SpeechState,
     },
     ApprovalRequest {
         intent: Intent,
@@ -69,8 +111,12 @@ impl PolarisEvent {
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Hotkey { .. } => "hotkey",
+            Self::HotkeyPermission { .. } => "hotkey_permission",
+            Self::CaptureStatus { .. } => "capture_status",
+            Self::AudioCaptured { .. } => "audio_captured",
             Self::Transcript { .. } => "transcript",
             Self::AgentStatus { .. } => "agent_status",
+            Self::SpeechStatus { .. } => "speech_status",
             Self::ApprovalRequest { .. } => "approval_request",
             Self::ApprovalResult { .. } => "approval_result",
             Self::TxSubmitted { .. } => "tx_submitted",
@@ -102,9 +148,27 @@ mod tests {
         let json = serde_json::to_string(&PolarisEvent::Transcript {
             text: "hi".into(),
             r#final: true,
+            language: Some("en".into()),
         })
         .unwrap();
-        assert_eq!(json, r#"{"type":"transcript","text":"hi","final":true}"#);
+        // Step A12: the detected language rides the transcript event. The
+        // webview relies on the exact key, so it is pinned here.
+        assert_eq!(
+            json,
+            r#"{"type":"transcript","text":"hi","final":true,"language":"en"}"#
+        );
+
+        // Unknown language is explicit `null`, never a missing/ambiguous field.
+        let json = serde_json::to_string(&PolarisEvent::Transcript {
+            text: "hi".into(),
+            r#final: true,
+            language: None,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"transcript","text":"hi","final":true,"language":null}"#
+        );
 
         let json = serde_json::to_string(&PolarisEvent::TxSubmitted {
             hash: "abc".into(),
@@ -114,6 +178,70 @@ mod tests {
         assert_eq!(
             json,
             r#"{"type":"tx_submitted","hash":"abc","explorerUrl":"https://stellar.expert/x"}"#
+        );
+    }
+
+    #[test]
+    fn hotkey_permission_matches_the_ts_union() {
+        let json = serde_json::to_string(&PolarisEvent::HotkeyPermission { trusted: false }).unwrap();
+        assert_eq!(json, r#"{"type":"hotkey_permission","trusted":false}"#);
+    }
+
+    #[test]
+    fn speech_status_matches_the_ts_union() {
+        // The overlay switches on `state`; both values must round-trip.
+        let json = serde_json::to_string(&PolarisEvent::SpeechStatus {
+            state: SpeechState::Speaking,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"type":"speech_status","state":"speaking"}"#);
+
+        let json = serde_json::to_string(&PolarisEvent::SpeechStatus {
+            state: SpeechState::Idle,
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"type":"speech_status","state":"idle"}"#);
+    }
+
+    #[test]
+    fn capture_events_match_the_ts_union() {
+        let json = serde_json::to_string(&PolarisEvent::CaptureStatus {
+            status: crate::types::CaptureStatus {
+                state: crate::types::CaptureState::Recording,
+                recording: None,
+                error: None,
+                label: None,
+            },
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"capture_status","status":{"state":"recording","recording":null,"error":null,"label":null}}"#
+        );
+
+        // Step A1 transitions ride the same event with no new variant.
+        let json = serde_json::to_string(&PolarisEvent::CaptureStatus {
+            status: crate::types::CaptureStatus {
+                state: crate::types::CaptureState::Transcribing,
+                recording: None,
+                error: None,
+                label: None,
+            },
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"capture_status","status":{"state":"transcribing","recording":null,"error":null,"label":null}}"#
+        );
+
+        let json = serde_json::to_string(&PolarisEvent::AudioCaptured {
+            path: "/tmp/polaris-1.wav".into(),
+            duration_ms: 1420,
+        })
+        .unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"audio_captured","path":"/tmp/polaris-1.wav","durationMs":1420}"#
         );
     }
 

@@ -10,23 +10,60 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   POLARIS_EVENT_NAME,
   isPolarisEvent,
-  type AgentStage,
   type AppInfo,
+  type CaptureStatus,
+  type NotchGeometry,
   type PolarisEvent,
 } from "@polaris/interfaces";
 
-/** `app_info` Tauri command — version/network shown in the panel header. */
+/** `app_info` Tauri command — version/network for diagnostics. */
 export async function getAppInfo(): Promise<AppInfo> {
   return invoke<AppInfo>("app_info");
 }
 
+/** Current capture snapshot; the overlay calls this once before events arrive. */
+export async function getCaptureStatus(): Promise<CaptureStatus> {
+  return invoke<CaptureStatus>("capture_status");
+}
+
 /**
- * Stand-in for the step-A0 hotkey path: asks Rust to push a full
- * `hotkey -> transcript -> agent_status` sequence over the event channel so the
- * log pane can be verified by hand. Deleted once real audio capture lands.
+ * Accessibility trust for the modifier-only gesture. Read on startup because
+ * the matching `hotkey_permission` event is emitted during Rust setup, before
+ * the webview listener attaches.
  */
-export async function devSelfTest(): Promise<PolarisEvent[]> {
-  return invoke<PolarisEvent[]>("dev_self_test");
+export async function getHotkeyPermission(): Promise<boolean> {
+  return invoke<boolean>("hotkey_permission");
+}
+
+/** Programmatic capture start — the global hotkey drives the same engine. */
+export async function captureStart(): Promise<CaptureStatus> {
+  return invoke<CaptureStatus>("capture_start");
+}
+
+/** Programmatic capture stop. Returns the final snapshot (`ready` on success). */
+export async function captureStop(): Promise<CaptureStatus> {
+  return invoke<CaptureStatus>("capture_stop");
+}
+
+/**
+ * Notch size in AppKit points. Polled so a display connect/disconnect or a
+ * resolution change repositions the overlay; there is no Tauri event for it.
+ */
+export async function getNotchGeometry(): Promise<NotchGeometry> {
+  return invoke<NotchGeometry>("notch_geometry");
+}
+
+/**
+ * Reports one agent-loop phase to the Rust per-turn timing trace (step A11).
+ *
+ * The webview console is invisible to the owner, so the phases that only exist
+ * in TypeScript (request built, intent parsed, sentence built) are forwarded to
+ * Rust, which owns the trace and prints the single per-turn block. Fire and
+ * forget on purpose: a missing or failing command must never add latency to, or
+ * break, a real turn.
+ */
+export function markTurnPhase(name: string): void {
+  void invoke("polaris_phase", { name }).catch(() => {});
 }
 
 /** Subscribes to the typed event stream. Events with an unknown shape are ignored. */
@@ -42,79 +79,3 @@ export async function listenPolarisEvents(
   });
 }
 
-export type LogTone = "neutral" | "accent" | "ok" | "warn" | "danger";
-
-export interface LogLine {
-  /** Stable key for React lists. */
-  id: string;
-  /** Local time, `HH:MM:SS`. */
-  at: string;
-  /** Who produced the line — shown so wiring problems are obvious at a glance. */
-  origin: "ui" | "rust" | "agent";
-  title: string;
-  detail?: string;
-  tone: LogTone;
-}
-
-export function nowLabel(now: Date = new Date()): string {
-  return now.toTimeString().slice(0, 8);
-}
-
-let lineCounter = 0;
-
-export function makeLine(line: Omit<LogLine, "id" | "at">): LogLine {
-  lineCounter += 1;
-  return { id: `line-${lineCounter}`, at: nowLabel(), ...line };
-}
-
-/** Renders one wire event into a log line. The UI never branches on the raw JSON. */
-export function describeEvent(event: PolarisEvent): Omit<LogLine, "id" | "at"> {
-  switch (event.type) {
-    case "hotkey":
-      return {
-        origin: "rust",
-        title: event.state === "down" ? "Hotkey pressed" : "Hotkey released",
-        tone: "accent",
-      };
-    case "transcript":
-      return {
-        origin: "agent",
-        title: event.final ? "Transcript (final)" : "Transcript (partial)",
-        detail: event.text,
-        tone: "neutral",
-      };
-    case "agent_status":
-      return { origin: "agent", title: `Agent: ${stageLabel(event.stage)}`, tone: "neutral" };
-    case "approval_request":
-      return {
-        origin: "agent",
-        title: `Approval requested — ${event.summary.title}`,
-        detail: event.summary.lines.join("\n"),
-        tone: "warn",
-      };
-    case "approval_result":
-      return {
-        origin: "rust",
-        title: event.approved ? "Touch ID approved" : "Approval denied",
-        detail: event.payloadHash,
-        tone: event.approved ? "ok" : "danger",
-      };
-    case "tx_submitted":
-      return { origin: "rust", title: "Transaction submitted", detail: event.hash, tone: "ok" };
-    case "error":
-      return { origin: "rust", title: "Error", detail: event.message, tone: "danger" };
-  }
-}
-
-function stageLabel(stage: AgentStage): string {
-  switch (stage) {
-    case "thinking":
-      return "thinking";
-    case "tool_call":
-      return "calling a tool";
-    case "awaiting_approval":
-      return "awaiting approval";
-    case "done":
-      return "done";
-  }
-}

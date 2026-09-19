@@ -43,16 +43,43 @@
 > the window, the log pane, the event plumbing and `app_info` are already in place
 > (`dev_self_test` is the temporary stand-in for the hotkey path and must be deleted
 > when A0 lands).
+>
+> 2026-09-19 — **A0 landed** (`feat/a0-push-to-talk-notch`): the shell is now the notch
+> overlay, `control+option+space` holds/releases a `cpal` capture, and `dev_self_test` is
+> gone. Build/test/typecheck/clippy are green; end-to-end microphone capture still needs a
+> human hold-and-speak check. See the A0 report.
+>
+> 2026-09-19 — **Modifier-only gesture + horizontal expand** (`feat/a0-push-to-talk-notch`): the
+> default trigger is now holding **Control+Option** (native `flagsChanged`, 300 ms arming,
+> Command/Shift excluded, 1 s watchdog), gated on Accessibility with `Control+Option+Space` kept
+> as the permission-free fallback; the notch height no longer animates so the expansion reads as
+> left/right only. Build/test/clippy/typecheck all green; the gesture, the Accessibility grant,
+> and the animation still need a human on the real machine. See
+> `backlog/2026-09-19-modifier-only-and-horizontal-expand.md`.
+>
+> 2026-09-19 — **A1 cloud-first STT** (`feat/a1-stt`): a finished capture is transcribed
+> automatically by a `GroqTranscriber` behind a `Transcriber` trait; the overlay shows
+> "Thinking" and never the transcript, which travels on `transcript { text, final }` and
+> the Rust terminal. WAV retention (delete-on-success, cap 10, keep failures) lands here.
+> Build/test/clippy/typecheck all green; real-provider latency and the 5-command
+> acceptance run are **unverified** (no API key in this environment). See the A1 report.
 
-#### A0 — Test harness 🔲
-- [ ] Minimal Tauri window: a "record" button (or hotkey) + a text log pane.
-- [ ] Purpose: every later step is tested by hand through this harness, no CLI hacks.
-- **Accept:** app runs, audio captured to a file, log pane prints events.
+#### A0 — Push-to-talk + notch overlay harness ✅
+> Design pivot (2026-09-19): the dashboard/log-pane harness was replaced by the notch
+> overlay from the design reference (`notch-design.md`: "Replace the A0 dashboard"). The
+> overlay's state *is* the harness — the typed event stream drives it directly.
+- [x] Notch overlay window (transparent, click-through, always-on-top, native AppKit geometry, all Spaces) driven purely by the `polaris-event` stream (2026-09-19, branch `feat/a0-push-to-talk-notch`).
+- [x] Global push-to-talk: **hold Control+Option** (release either) is the default gesture, with `control+option+space` kept as the permission-free fallback (2026-09-19, branch `feat/a0-push-to-talk-notch`).
+- [x] Notch expansion reads as horizontal only: the width keeps the spring curve, the height transition was removed (2026-09-19).
+- [x] Microphone capture with `cpal` → 16-bit PCM WAV (`hound`); microphone/permission failures surface as the overlay `error` state.
+- [x] Temporary `dev_self_test` deleted; `capture_start` / `capture_stop` / `capture_status` / `notch_geometry` commands added.
+- **Accept:** app runs and the overlay is positioned from real AppKit geometry (verified: idle pill matches the measured cutout 179×32 pt, expanded 680×66 pt on the built-in display); holding the hotkey to produce a WAV is **not yet verified by a human** — see `backlog/2026-09-19-a0-push-to-talk-notch.md`.
 
 #### A1 — STT (speech → text) 🔲
-- [ ] Model choice (decide, record in notes.md): local `whisper.cpp` (Metal) first; cloud API fallback only if quality fails.
-- [ ] Wire: captured audio → STT → transcript into the log pane.
-- **Accept:** speak 5 different commands, all transcribe correctly, <2s latency on release.
+- [x] Model choice (decided, recorded in notes.md): **cloud-first** — Groq `whisper-large-v3-turbo` behind a one-method `Transcriber` trait, so a local `whisper.cpp` backend can be added without touching call sites (2026-09-19, branch `feat/a1-stt`).
+- [x] Wire: captured audio → STT → `transcript { text, final }` on the event stream + Rust terminal; overlay shows "Thinking" only and never the transcript (2026-09-19).
+- [x] Retention (A0 review MAJOR-3): delete a recording after a successful transcription, keep failed ones, cap the recordings dir at 10 (2026-09-19).
+- [ ] **Accept:** speak 5 different commands, all transcribe correctly, <2s latency on release — **blocked on a `GROQ_API_KEY` and a human run** (latency unmeasured so far; see `backlog/2026-09-19-a1-stt.md`).
 
 #### A2 — LLM roundtrip (text → agent → response) 🔲
 - [ ] Agent core (Claude tool-use) receives transcript, returns a structured answer to the log pane.

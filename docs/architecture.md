@@ -72,8 +72,9 @@ flowchart TD
         KEY -->|"signature"| ST
     end
 
-    AG --> LLM["Claude API"]
+    AG --> LLM["LLM API (OpenAI-compatible)"]
     AG --> STT["Speech-to-text"]
+    AG --> TTS["Text-to-speech<br/>Fish Audio / local say"]
     AG --> MCP["MCP: Raven, LumenLoop<br/>read-only knowledge"]
     AG --> DEV["Developer mode<br/>workspace files, allow-listed CLI"]
     ST --> ANC["TR Mock Anchor<br/>SEP-1/10/12/38/6"]
@@ -94,12 +95,17 @@ flowchart TD
 | Trigger | Tauri global-shortcut plugin. Handler receives `ShortcutState::Pressed` / `Released` → hold-to-talk. *Verified:* docs.rs `tauri_plugin_global_shortcut`. | ✅ |
 | Capture | Microphone via webview `getUserMedia` or Rust (`cpal`); decided in the shell spike | 🔲 |
 | STT (Turkish) | **Not decided.** Current plan: try **Whisper** first (local `whisper-rs`/whisper.cpp — offline, no key, safe on flaky venue Wi-Fi — or a cloud Whisper API). If it proves unstable, fall back to a **multimodal model that accepts audio directly**. Caveat: we have *not* verified that Claude models accept audio input — check before relying on it; otherwise another provider's API is needed. Decide by spike: Turkish accuracy + latency | 🔲 |
-| TTS | macOS `say -v Yelda` (free, Turkish voice) for MVP | 🟡 |
-| Read-back | Assistant reads back parsed amount + recipient **before** any approval (guards against STT errors) | 🟡 |
+| TTS | **Fish Audio** `s2.1-pro-free` as primary (voice fixed by `POLARIS_TTS_REFERENCE_ID`), macOS `say -v Yelda` as the required local fallback; backend chosen by `POLARIS_TTS_BACKEND` | ✅ live 2026-09-19: pinned voice `9335…` (`Sarah`) verified end to end, MPEG payload + `afplay` (`backlog/2026-09-19-a3-tts.md`) |
+| Read-back | Assistant speaks the parsed amount + recipient **before** any approval (guards against STT errors). A4 builds the sentence in TypeScript (`agent/src/speech.ts`) and hands the finished string to the Rust `speak` command; playback is non-blocking and utterances never overlap | ✅ (`backlog/2026-09-19-a4-speak-intent.md`) |
 
 ### 4.2 Agent core
-- **LLM:** Claude via the Anthropic API. Proposed `claude-sonnet-5` for the main loop (latency/cost); vision for screenshots. Optional `claude-haiku-4-5-20251001` for fast intent routing. Needs an API key, stored in a local, git-ignored `.env`. 🟡
-- **Loop:** system prompt (Stellar-specialised, safety rules) → tool-use loop → structured result to UI. Tools are grouped by risk tier (§6).
+- **LLM:** **OpenCode Zen Go**, OpenAI-compatible, model `glm-5.3-flash` (tool calling, no reasoning tokens). ✅ decided (2026-09-19, owner). It replaced `deepseek-v4.1-flash` in step A5 (same correctness on the real task; median 1857 ms vs 2085 ms). The endpoint is reached at `https://opencode.ai/zen/go/v1/chat/completions` with `Authorization: Bearer $OPENCODE_API_KEY`; it requires a per-conversation `x-opencode-session` header and a descriptive `User-Agent`. *Verified:* live curl on 2026-09-19 returns a correct `tool_calls` response for the Turkish command "Ahmete 5 USDC gönder".
+  - **Provider is swappable by construction.** The client (`agent/src/llm/openai.ts`) implements the narrow `AgentLlm` port; base URL, model id and key come only from `POLARIS_AGENT_BASE_URL`, `POLARIS_AGENT_MODEL`, `OPENCODE_API_KEY`. Switching to Groq or OpenRouter (both OpenAI-compatible) is a `.env` change — no code change. A `ScriptedLlm`/`MockLlm` keeps the test suite off the network.
+  - **Anthropic is a second implementation of the same port (A11).** `agent/src/llm/anthropic.ts` speaks the Messages API (`POST /v1/messages`, `x-api-key`, `anthropic-version: 2023-06-01`, top-level `system`, `input_schema` tools, required `max_tokens`). `POLARIS_AGENT_PROVIDER=anthropic` selects it and `POLARIS_AGENT_MODEL` chooses `claude-sonnet-5` / `claude-haiku-4-5`; the key is `ANTHROPIC_API_KEY`. Thinking is off for latency (Sonnet 5: `thinking:{type:"disabled"}` and no `budget_tokens`; Haiku 4.5: the field is omitted and `output_config.effort` is never sent). The Rust transport is provider-aware so the Anthropic key still never enters the webview bundle.
+  - **Language is model-reported (A11).** The model returns the language of the turn (a `language` field on a tool call, or a leading `[xx]` tag on a text answer); the loop forwards it and the TTS layer selects a per-language voice, falling back to the pinned `POLARIS_TTS_REFERENCE_ID`. The reply itself is in the user's language because the system prompt requires it (`agent/src/prompt.ts`).
+  - **The key never enters the webview.** The webview makes no provider HTTP request at all: it invokes the Rust `agent_chat` command (`app/src-tauri/src/agent.rs`), which reads `POLARIS_AGENT_BASE_URL` / `OPENCODE_API_KEY`, adds `Authorization` plus the session/User-Agent headers, and returns the provider's status and raw body. The TypeScript client keeps request construction, the error taxonomy and response parsing; only the transport moved. This also avoids the Tauri WKWebView's WebIDL receiver restriction on `Window.fetch`, and a packaged Polaris needs no dev server. ✅ (step A6; replaced the A2 Vite `/agent-api` proxy — see `backlog/2026-09-19-a6-webview-agent-transport.md`)
+- **Loop:** system prompt (Stellar-specialised, safety rules) → tool-use loop → structured result to UI. Tools are grouped by risk tier (§6). Step A2 produces a validated `Intent` (e.g. `send_payment`) without executing it; the unsigned-XDR chain tools arrive in A5.
+- **Spoken answer (A4):** a successful turn is spoken aloud through the Rust `speak` command. The sentence is built on the TypeScript side — a produced intent becomes a short confirmation (`Sending 5 USDC to Ahmet. Do you confirm?`, and its Turkish equivalent when the turn is Turkish, A11), a clarification is read as-is, and internal errors are never spoken. Playback is queued so utterances never overlap; `TTSError` never affects the visible result.
 - **Knowledge tools (MCP, read-only):** all *verified* 2026-09-19.
 
 | MCP | Transport / auth | Notes |
@@ -127,7 +133,7 @@ flowchart TD
 ### 4.5 Key custody & approval
 1. Agent produces an **intent** (structured, not a signature).
 2. UI renders the approval card **from the decoded XDR** — *not* from the LLM's description of it.
-3. Assistant reads back amount/recipient.
+3. Assistant speaks back amount/recipient (A4: `spokenText(intent)` → `speak`).
 4. User authenticates with **Touch ID**; the Rust core releases the key and signs.
 5. Result is submitted; hash + explorer link shown.
 
@@ -245,8 +251,8 @@ Threats and mitigations:
 | Shell | **Tauri v2** with a *thin Rust core* + TypeScript/React webview. Rationale: native press/release hotkey, key custody and signing outside the webview, Touch ID plugin exists, small footprint. **Not** because "Stellar uses Rust" — contracts are a separate project and app-side Stellar SDKs are JS-first. | ✅ (spike-gated) |
 | Fallback | If the spike fails (hotkey, mic, Touch ID, or macOS permissions in dev builds), switch to **Electron**: the TS brain is reused unchanged. | ✅ |
 | UI | React + TypeScript (Vite) | 🟡 |
-| LLM | Claude API | 🟡 |
-| STT / TTS | see §4.1 | 🔲 / 🟡 |
+| LLM | OpenCode Zen Go (`glm-5.3-flash`) or Anthropic (`claude-sonnet-5` / `claude-haiku-4-5`) behind the same `AgentLlm` port; selected by `POLARIS_AGENT_PROVIDER` | ✅ |
+| STT / TTS | see §4.1 | 🔲 / ✅ (live Fish + A4 spoken read-back) |
 | Contracts | Rust + `soroban-sdk`, deployed with Stellar CLI | ✅ |
 | Network | Stellar **testnet** only | ✅ |
 
@@ -292,7 +298,7 @@ Handbook requires citing skill files by path. Candidates, from `https://skills.s
 | Handbook claims of a "Launchtube" requirement | Not in the handbook; service is retired. Ask organizers if in doubt |
 | No LICENSE in repo | Choose a license before submission (public repo is required) |
 
-Open decisions: STT provider · LLM/API providers beyond Claude · protocol (Soroswap vs DeFindex vs MPP-as-integration) · MPP role (pay-per-command vs template) · which own contract(s): guard / P2P escrow / both · developer-mode implementation (Agent SDK sidecar vs custom tool loop) · guard scope (payments only vs also protocol calls) · whether SEP-10 signing needs Touch ID · coordinator-model rules from `CLAUDE.md` (to be discussed before coding starts).
+Open decisions: STT provider · protocol (Soroswap vs DeFindex vs MPP-as-integration) · MPP role (pay-per-command vs template) · which own contract(s): guard / P2P escrow / both · developer-mode implementation (Agent SDK sidecar vs custom tool loop) · guard scope (payments only vs also protocol calls) · whether SEP-10 signing needs Touch ID · coordinator-model rules from `CLAUDE.md` (to be discussed before coding starts). LLM provider is decided: OpenCode Zen Go, behind a swappable OpenAI-compatible port (§4.2).
 
 ---
 
