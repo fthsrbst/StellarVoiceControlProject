@@ -1,0 +1,62 @@
+# ─────────────────────────────────────────────────────────────
+# Secrets — NEVER commit these
+# ─────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.seed
+secrets/
+
+# Stellar CLI project-local config. Identities here hold SECRET KEYS.
+# (Global identities live in ~/.config/stellar, outside the repo.)
+.stellar/
+
+# ─────────────────────────────────────────────────────────────
+# OS / editors
+# ─────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# ─────────────────────────────────────────────────────────────
+# Rust (Soroban contracts + Tauri core)
+# Cargo.lock is intentionally NOT ignored (reproducible builds).
+# ─────────────────────────────────────────────────────────────
+target/
+**/*.rs.bk
+
+# ─────────────────────────────────────────────────────────────
+# Node / TypeScript / Vite
+# ─────────────────────────────────────────────────────────────
+node_modules/
+dist/
+.vite/
+.pnpm-store/
+*.log
+npm-debug.log*
+
+# ─────────────────────────────────────────────────────────────
+# Tauri generated files
+# ─────────────────────────────────────────────────────────────
+src-tauri/gen/schemas/
+
+# ─────────────────────────────────────────────────────────────
+# Speech / AI local assets (large or private)
+# ─────────────────────────────────────────────────────────────
+models/
+ggml-*.bin
+*.gguf
+recordings/
+captures/
+*.wav
+
+# ─────────────────────────────────────────────────────────────
+# Project workflow (see CLAUDE.md, worktree rule)
+# ─────────────────────────────────────────────────────────────
+.worktrees/
+.claude/settings.local.json
+tmp/
+.tmp/
