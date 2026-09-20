@@ -72,10 +72,16 @@ approval gate then sees the decoded `summary` + `payloadHash`.
   `{ kind: "approved", ... }`; the existing `ExecutionOutcome` uses
   `status: "executed"` and `app/src/App.tsx` (out of scope) consumes it, so the
   success outcome keeps `status: "executed"` and gains `payloadHash`.
-- **Payload hash in the agent = SHA-256 of the unsigned XDR string**, as the task
-  specified. It is a stand-in for Owner B's `payloadHashOf` (SHA-256 of the
-  signature base of the envelope, i.e. `Transaction.hash()`); the signing
-  milestone must reconcile the two before touch-ID verification is trusted.
+- **The agent seam's `payloadHash` is the XDR digest, by decision (W1-fix).** It is
+  lowercase-hex SHA-256 of the UTF-8 bytes of the base64 unsigned-XDR string — the
+  value the Touch ID gate and the `approval_request`/`approval_result` events use,
+  computable in Rust without XDR parsing, and binding the exact blob a signer is
+  handed. It is **not** Owner B's `payloadHashOf` (SHA-256 of the signature base,
+  i.e. `Transaction.hash()`), which identifies the transaction on-chain and appears
+  only in the chain summary's explorer URL. After review, the two are deliberately
+  kept as separate values; the helper is named `xdrDigest` in code and the field is
+  only called `payloadHash` at the gate/event boundary (see the Review fixes
+  section, M-1).
 - **`stellar/src/index.ts` was extended additively** (re-exported
   `configurePayments`, `defaultPaymentDeps`, `parseAliasBook`, `PaymentRefusal`,
   and the `AliasBook`/`PaymentDeps` types). This file was not in the listed scope,
@@ -95,8 +101,8 @@ approval gate then sees the decoded `summary` + `payloadHash`.
 
 `npm test -w @polaris/agent`:
 ```
-ℹ tests 114
-ℹ pass 114
+ℹ tests 118
+ℹ pass 118
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
@@ -114,20 +120,23 @@ approval gate then sees the decoded `summary` + `payloadHash`.
 ```
 keeper (node:test):  tests 67   pass 67   fail 0
 anchor:              Test Files 8 passed (8)   Tests 197 passed (197)
-approval:            Test Files 7 passed (7)   Tests 121 passed (121)
-payments:            Test Files 7 passed (7)   Tests 133 passed (133)
-guard:               Test Files 4 passed (4)   Tests 112 passed (112)
+approval:            Test Files 4 passed (4)   Tests 112 passed (112)
+payments:            Test Files 7 passed (7)   Tests 122 passed (122)
+guard:               Test Files 7 passed (7)   Tests 133 passed (133)
 schedule:            Test Files 5 passed (5)   Tests 121 passed (121)
 suggest:             Test Files 4 passed (4)   Tests 145 passed (145)
 live:                Test Files 12 passed (12) Tests 112 passed (112)
 ```
+(Counts corrected per review finding m-3: approval/guard were rotated and their
+file counts swapped; `payments` is 122 after the M-1 regression test.)
 
 `caffeinate -i cargo test --manifest-path app/src-tauri/Cargo.toml` (exit 0):
 ```
-test result: ok. 130 passed; 0 failed; 5 ignored
+test result: ok. 131 passed; 0 failed; 5 ignored
 ```
-`stellar_config` module: **7 passed; 0 failed** (defaults, allow-list, no-other-env,
-malformed owner, malformed aliases, camelCase shape, alias charset).
+`stellar_config` module: **8 passed; 0 failed** (defaults, allow-list, no-other-env
+with an exact key-set assertion, malformed owner, bad-checksum owner, malformed
+aliases, camelCase shape, alias charset).
 
 `caffeinate -i cargo clippy --manifest-path app/src-tauri/Cargo.toml -- -D warnings`:
 clean (finished without warnings).
@@ -193,6 +202,106 @@ nothing was signed or submitted
 
 ## Suggested Next Step
 
-- Signing milestone: add the Touch ID gate over `ApprovalRequest.payloadHash`,
-  reconcile the agent's XDR-string hash with Owner B's signature-base hash, then
-  submit and emit `tx_submitted`.
+- Signing milestone: add the Touch ID gate over `ApprovalRequest.payloadHash`
+  (the XDR digest), then submit and emit `tx_submitted`.
+
+## Review fixes (W1-fix)
+
+Applied the independent review (`backlog/w1-network-wiring-review.md`) per the
+coordinator's decisions. What changed per finding:
+
+- **M-1 — the two hashes are now impossible to confuse.**
+  - **Decision (unchanged seam):** at the approval gate the `payloadHash` stays the
+    lowercase-hex SHA-256 of the UTF-8 bytes of the base64 unsigned-XDR string (the
+    "XDR digest"). The Stellar transaction hash is a different value and is used
+    only by the chain summary / explorer URL.
+  - The agent helper `payloadHashOfXdr` is renamed to **`xdrDigest`**, and the
+    `ExecuteIntentOptions.payloadHash` override to **`xdrDigest`**; the field is
+    called `payloadHash` only at the gate/event boundary (`ApprovalRequest`,
+    `ExecutionOutcome`, the `approval_request`/`approval_result` events).
+  - Added a prominent doc block in `agent/src/execution.ts` and a comment block in
+    `interfaces/src/index.ts` (comments only, no shape change) stating both
+    definitions and the rule that the tx hash must never be passed where the digest
+    is expected.
+  - Added a regression test that pins **both** values for one fixed XDR fixture
+    (digest `c1d5910a…`, tx hash `2f38a676…`, digest ≠ tx hash) and asserts the
+    seam's `payloadHash` is the digest, never the tx hash. The stellar suite pins
+    the same fixture's tx hash via `payloadHashOf`, so swapping either side fails.
+  - `scripts/e2e-build-xdr.mjs` now prints both, labelled `xdrDigest` and `txHash`
+    (it previously mislabelled the tx hash as `payloadHash`).
+  - Re-exported `payloadHashOf` from `stellar/src/index.ts` with a warning comment
+    (n-10), so the tx-hash helper is reachable and explicitly distinct.
+- **M-2 — malformed tool results fail closed.** `executeIntent` now validates the
+  tool result (`isUsableToolResult`): a missing/empty `unsignedXdr` or a malformed
+  `summary` returns a labelled `failed` / `Chain error` and never opens the gate.
+  Tests cover `{}`, `{summary}`, empty string, and several malformed summaries.
+- **m-3 — corrected the stellar suite counts** in the Test output section above
+  (approval 112/4 files, payments 122/7, guard 133/7; the old table had them
+  rotated and the file counts swapped).
+- **m-4 — the "never throws" contract has no holes.** `chainTools` is read with
+  optional chaining (an undefined tool set → `unsupported`), and a non-object
+  approver decision (`undefined`/`null`) becomes `failed` / `Approval error`.
+  Both are pinned by tests.
+- **m-5 — SHA-256 vectors broadened.** Added the NIST 56-byte multi-block vector
+  (`248d6a61…`) and a 72-byte UTF-8 (Turkish + emoji) vector
+  (`e1bcfee4…`); removed the tautological `sha256Hex === sha256Hex` test and now
+  assert literal digests.
+- **m-6 — owner/alias addresses are checksum-validated.** `stellar_config.rs` now
+  decodes the base32 StrKey and verifies the version byte (`0x30`) and the
+  CRC16-XModem checksum, so a shape-valid typo is rejected (fail-closed) instead of
+  surfacing later as a Horizon error. New test pins a bad-checksum address → `null`.
+- **m-8 — stale docs corrected.** `notes.md` and
+  `backlog/2026-09-19-a9-execution-seam.md` no longer describe the old
+  `approve(intent)` signature / "tool NOT called on deny"; they now match the W1
+  build-then-approve order and the card-level `approve(request)`.
+- **NITs.** n-9: trailing newline added to `interfaces/src/index.ts`. n-10:
+  `payloadHashOf` re-exported (above). n-11: the allow-list test now asserts the
+  exact serialized key set, not just the absence of `"secret"`. n-12: `network`,
+  `rpcUrl`, `guardContractId` remain interface fields with no consumer until the
+  guard route is wired — noted, not removed (removing them would change the wire
+  shape).
+
+### Verification after the fixes
+
+`npm run check`: clean (interfaces, agent, stellar, app — `tsc` exit 0).
+
+`npm test -w @polaris/agent`: **118 passed / 0 failed** (was 114; +M-2, +m-4).
+`npm test -w @polaris/app`: **19 passed / 0 failed**.
+`npm test -w @polaris/stellar` (exit 0): keeper **67**; anchor 8/**197**; approval
+4/**112**; payments 7/**122**; guard 7/**133**; schedule 5/**121**; suggest
+4/**145**; live 12/**112**.
+`caffeinate -i cargo test --manifest-path app/src-tauri/Cargo.toml`: **131 passed;
+0 failed; 5 ignored**.
+`caffeinate -i cargo clippy --manifest-path app/src-tauri/Cargo.toml -- -D warnings`:
+clean (`Finished dev profile`, no warnings).
+
+Live read-only `e2e:build-xdr` (same env values as the original proof):
+```
+POLARIS_OWNER_ADDRESS=GAJW5V7VXHIRTJBGNVYTGXJ6CLDM7IEIPAYD3XLKKTKJKPRBYOTAC25A \
+POLARIS_ALIASES=acc2=GB25QEDATQREAQQHBW3DAGLOZ3EURS44URZETXLLREPPYCX2ABCORNLV \
+npm run e2e:build-xdr -- 1
+```
+```
+owner: GAJW5V7VXHIRTJBGNVYTGXJ6CLDM7IEIPAYD3XLKKTKJKPRBYOTAC25A
+intent: send 1 XLM to acc2 (GB25QEDATQREAQQHBW3DAGLOZ3EURS44URZETXLLREPPYCX2ABCORNLV)
+horizon (read-only): https://horizon-testnet.stellar.org
+summary:
+{
+  "title": "Send 1 XLM to acc2",
+  "lines": [
+    "Pay 1 XLM (native)",
+    "To acc2 (GB25QEDATQREAQQHBW3DAGLOZ3EURS44URZETXLLREPPYCX2ABCORNLV)",
+    "Network: Test SDF Network ; September 2015",
+    "Fee: 0.00001 XLM"
+  ],
+  "explorerUrl": "https://stellar.expert/explorer/testnet/tx/f3afd8f7a31e5c48a905a12300513de3e4fae97f0c39a3101fc07c4be09f4e1d",
+  "estimatedFee": "0.00001 XLM"
+}
+xdrDigest: 26c1cbddd076dfa85ffd55d25257b5c82e69e97c46e09178a8933d3cc30d72f6
+txHash: f3afd8f7a31e5c48a905a12300513de3e4fae97f0c39a3101fc07c4be09f4e1d
+unsignedXdr: AAAAAgAAAAATbtf1udEZpCZtcTNdPhLGz6CIeDA93WpU1JU+IcOmAQAAAGQASL86AAAAAQAAAAEAAAAAAAAAAAAAAABqryehAAAAAAAAAAEAAAAAAAAAAQAAAAB12BBgnCJAQgcNtjAZbs7JSMucpHJJ3WuJHvwK+gBE6AAAAAAAAAAAAJiWgAAAAAAAAAAA
+nothing was signed or submitted
+```
+
+All deferred/human-verified items from the original report still stand (live
+window, Touch ID, real submission); none was claimed as verified here.

@@ -431,15 +431,18 @@
      the task says leave out a stage nobody can read. The union is now
      `listening | thinking | speaking | failed`.
   4. **One execution path, injected, never throwing.** `executeIntent(intent,
-     { approver, chainTools })` resolves the tool → asks the gate → calls the
-     tool, returning `executed | rejected | unsupported | unavailable | failed`.
+     { approver, chainTools })` resolves the tool → **builds the unsigned XDR
+     (side-effect-free)** → asks the gate → returns
+     `executed | rejected | unsupported | unavailable | failed`.
      `NotImplementedError` is matched by name → `unavailable`/`Chain not wired`,
      the expected state today, so the notch says so and settles. The chain tools
      are injected, so the agent core imports none of Owner B's package.
-  5. **Approval gate seam, not Touch ID.** `IntentApprover.approve(intent)` sits
-     between "intent produced" and "chain tool called"; the shell passes a loud
+  5. **Approval gate seam, not Touch ID.** `IntentApprover.approve(request)` — the
+     card-level `{ intent, summary, payloadHash }`, not just the intent — sits
+     between "unsigned XDR built" and "value can move"; the shell passes a loud
      `createAutoApprovalPlaceholder()` that is the single object the biometric
-     milestone replaces. Approval-gated tools still never run during the turn.
+     milestone replaces. (W1-fix: the seam was reordered to build the XDR first;
+     `payloadHash` here is the XDR digest, not the Stellar transaction hash.)
   6. **MCP scaffolding is read-only by construction.** A config-driven client
      (`POLARIS_MCP_SERVER_URL`; absent = off, no error) speaks JSON-RPC over
      Streamable HTTP (JSON + SSE), and `registerReadOnlyMcpTools` exposes only
@@ -483,7 +486,8 @@
   5. **The biometric drop-in is scoped honestly (M6).** The approver sees only
      the `Intent`, so the seam supports intent-level gating — not the card-level
      approval that needs the post-tool `summary` + `payloadHash`. Said so in the
-     seam, the shell and the A9 handoff doc.
+     seam, the shell and the A9 handoff doc. (Superseded by W1: the seam was later
+     reordered to build the XDR first and now hands the approver the card.)
   6. **`depositTry` is real (M8).** Corrected the "every `ChainTool` throws
      `NotImplementedError`" prose to name `sendPayment`/`swap`/`guardPolicy`, and
      documented the deposit path (unconfigured → `Chain error`; configured → real

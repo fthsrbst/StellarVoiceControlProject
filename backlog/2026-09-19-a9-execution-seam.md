@@ -99,10 +99,18 @@ only for its own utterance; a dropped superseded utterance never reports).
 runAgentTurn → Intent
    ↓  app/src/lib/chain.ts: executeApprovedIntent(intent)
    ↓  agent/src/execution.ts: executeIntent(intent, { approver, chainTools })
-       1. resolve chainTools[intent.kind]      → missing: "unsupported"
-       2. await approver.approve(intent)        → denied:  "rejected" (tool NOT called)
-       3. await tool(intent)                    → "executed" | "unavailable" | "failed"
+       1. resolve chainTools[intent.kind]     → missing: "unsupported"
+       2. await tool(intent)                   → builds the unsigned XDR
+                                                 (side-effect-free)
+       3. await approver.approve(request)      → denied:  "rejected" (result discarded)
+       4. return "executed" (result + payloadHash)
 ```
+
+> **W1 correction.** The order is now **build then ask** (step 2 before step 3):
+> the approval card renders the exact transaction that would be signed. The gate
+> receives the card-level `ApprovalRequest` `{ intent, summary, payloadHash }`,
+> where `payloadHash` is the **XDR digest** — SHA-256 of the base64 unsigned-XDR
+> string — not the Stellar transaction hash.
 
 `ExecutionOutcome` never throws; every non-success carries a short `label` (the
 notch line) and a full `detail` (the console/Rust log):
@@ -117,21 +125,26 @@ notch line) and a full `detail` (the console/Rust log):
 
 ### Approval gate seam
 
-`IntentApprover` is the explicit seam, and `executeIntent` calls the tool **only**
-after `approve()` resolves `{ approved: true }` (pinned by a test that asserts
-the call order and that a denied intent never reaches the tool). A throwing
-approver is caught and returned as a labelled `failed` outcome, so the seam never
-throws. Touch ID is *not* implemented.
+`IntentApprover` is the explicit seam. In W1 the order became **build then ask**:
+`executeIntent` runs the chain tool (side-effect-free — it only builds the
+unsigned XDR + summary), then calls `IntentApprover.approve(request)` with the
+card-level `{ intent, summary, payloadHash }`. A deny discards the built result,
+so the XDR never reaches a signer (pinned by tests that assert the call order and
+that a denied intent keeps no result). A throwing approver is caught and returned
+as a labelled `failed` outcome, so the seam never throws. Touch ID is *not*
+implemented.
 
 **A10 correction (M5/M6).** The shell no longer auto-approves by default: it
 selects its approver with `resolveApprover(...)`, which returns a deny-all gate
 unless `POLARIS_ALLOW_AUTO_APPROVE=1` explicitly opts into the loud
 `createAutoApprovalPlaceholder()`. The placeholder is a stand-in for the stubbed
-demo only. It is also an **intent-level** gate: the approver sees only the
-`Intent`, so a Touch ID implementation drops in for "approve/deny before any
-chain work" — but *not* for the card-level approval, which needs the post-tool
-`summary` + `payloadHash` (`PolarisEvent::approval_request`) and therefore a
-second, post-tool phase this seam does not implement.
+demo only.
+
+**W1 correction.** The gate is now **card-level**: the approver sees the post-tool
+`summary` + `payloadHash` (`PolarisEvent::approval_request`), so a Touch ID
+implementation drops in over exactly the transaction that would be signed.
+`payloadHash` is the **XDR digest** (SHA-256 of the base64 unsigned-XDR string),
+not the Stellar transaction hash.
 
 ### `NotImplementedError` is the expected state today
 
@@ -286,8 +299,9 @@ One product note (A10 correction): `app/src/lib/chain.ts` is **fail-closed by
 default** — it installs a deny-all approver unless `POLARIS_ALLOW_AUTO_APPROVE=1`
 opts into the auto-approving placeholder for the stubbed demo. Before any real
 value-moving tool ships, Owner A must replace that selection with the Touch ID
-approver; the seam (`IntentApprover.approve(intent)`) is the only thing it
-implements, and it is intent-level only (see the approval-gate note above).
+approver; the seam (`IntentApprover.approve(request)`) is the only thing it
+implements, and since W1 it is card-level (the request carries the intent plus the
+post-tool `summary` + `payloadHash`; see the approval-gate note above).
 
 ---
 

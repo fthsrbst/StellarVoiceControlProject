@@ -71,6 +71,14 @@
 > then ask the approver with the decoded `summary` + `payloadHash`. A live read-only script
 > (`npm run e2e:build-xdr`) printed a real testnet unsigned XLM XDR for acc1→acc2. Signing and
 > submission remain a later milestone. See `backlog/w1-network-wiring.md`.
+>
+> 2026-09-20 — **W1-fix review corrections**: the seam's `payloadHash` is now documented
+> and named as the XDR digest (`xdrDigest`), distinct from the Stellar transaction hash
+> (both pinned for one fixture, so a swap fails); a malformed tool result fails closed;
+> `executeIntent` no longer throws on an undefined tool set or a non-object decision; the
+> owner/alias `G...` addresses are CRC16-XModem checksum-validated in Rust; SHA-256
+> multi-block/UTF-8 vectors added. All suites/clippy green. See the Review fixes section in
+> `backlog/w1-network-wiring.md`.
 
 #### A0 — Push-to-talk + notch overlay harness ✅
 > Design pivot (2026-09-19): the dashboard/log-pane harness was replaced by the notch
