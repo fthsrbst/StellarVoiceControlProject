@@ -17,6 +17,7 @@ import {
 import { AnthropicLlm } from "./llm/anthropic.ts";
 import { OpenAiCompatibleLlm } from "./llm/openai.ts";
 import { depositTool, withdrawTool } from "./tools/anchor.ts";
+import { getBalanceTool } from "./tools/balance.ts";
 import { sendPaymentTool } from "./tools/payment.ts";
 import { cancelScheduleTool, schedulePaymentTool } from "./tools/schedule.ts";
 import { p2pAcceptTool, p2pConfirmTool, p2pOfferTool } from "./tools/p2p.ts";
@@ -31,10 +32,13 @@ import { createToolRegistry, type ToolRegistry } from "./tools/registry.ts";
  * exported and used by `demo.ts` and the loop tests. W5b adds `deposit` and
  * `withdraw` for the anchor on/off-ramp, W6b the two schedule tools and W8b the
  * P2P escrow tools; they all validate into an `Intent` and never touch the chain.
+ * `get_balance` (T1) is the one read-only tool: it returns balances, never an
+ * `Intent`, and the loop speaks its `toSpeech` sentence.
  */
 export function createDefaultRegistry(): ToolRegistry {
   return createToolRegistry()
     .register(sendPaymentTool)
+    .register(getBalanceTool)
     .register(depositTool)
     .register(withdrawTool)
     .register(schedulePaymentTool)

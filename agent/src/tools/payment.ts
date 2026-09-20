@@ -15,7 +15,7 @@
  */
 import type { Intent } from "@polaris/interfaces";
 import { normalizeRecipient } from "../accountRefs.ts";
-import { DEFAULT_ASSET, describeSupportedAssets, normalizeAsset } from "../assets.ts";
+import { describeSupportedAssets, normalizeAsset } from "../assets.ts";
 import { AgentError } from "../errors.ts";
 import type { AgentTool, ToolContext } from "./registry.ts";
 
@@ -58,13 +58,13 @@ function requireText(value: unknown, field: string): string {
 /**
  * Validates a model-supplied payment and returns the shared `Intent`.
  *
- * `asset` is canonicalised against `assets.ts`: a blank value defaults to
- * `DEFAULT_ASSET` (the system prompt tells the model to omit it when the user
- * named no asset), a colloquial money word maps to the supported stablecoin,
- * and a genuinely unsupported code is rejected — a guess must become a
- * clarification, not an intent that reaches the approval seam. `recipient` is
- * kept verbatim (an address book alias like "Ahmet" is a valid recipient;
- * resolution is Owner B's job).
+ * `asset` is required (T1): the old USDC default was removed because small
+ * amounts are often XLM, so an omitted or blank asset must become a
+ * clarification ("Which asset — XLM or USDC?"), never a guess. A named code or
+ * a colloquial money word still canonicalises against `assets.ts`, and a
+ * genuinely unsupported code is rejected — nothing guessed reaches the approval
+ * seam. `recipient` is kept verbatim (an address book alias like "Ahmet" is a
+ * valid recipient; resolution is Owner B's job).
  */
 export function parseSendPayment(input: unknown, ctx: ToolContext): Intent {
   if (typeof input !== "object" || input === null) {
@@ -72,6 +72,13 @@ export function parseSendPayment(input: unknown, ctx: ToolContext): Intent {
   }
   const raw = input as SendPaymentInput;
   const amount = parseAmount(raw.amount);
+  if (
+    raw.asset === undefined ||
+    raw.asset === null ||
+    (typeof raw.asset === "string" && raw.asset.trim().length === 0)
+  ) {
+    bad("asset is missing; ask which asset (XLM or USDC) instead of guessing it");
+  }
   const asset = normalizeAsset(raw.asset);
   if (asset === undefined) {
     bad(
@@ -109,7 +116,9 @@ export const sendPaymentTool: AgentTool<SendPaymentInput, Intent> = {
       },
       asset: {
         type: "string",
-        description: `Asset code; only ${describeSupportedAssets()} are supported. Defaults to ${DEFAULT_ASSET}.`,
+        description:
+          `Asset code; only ${describeSupportedAssets()} are supported. ` +
+          "Omit it when the user named no asset, and ask instead of guessing.",
       },
       recipient: {
         type: "string",
@@ -123,7 +132,7 @@ export const sendPaymentTool: AgentTool<SendPaymentInput, Intent> = {
           "Used to pick the reply voice; never spoken.",
       },
     },
-    required: ["amount", "asset", "recipient"],
+    required: ["amount", "recipient"],
     additionalProperties: false,
   },
   requiresApproval: true,

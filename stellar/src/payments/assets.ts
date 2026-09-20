@@ -1,13 +1,17 @@
 /**
  * Asset registry for payments. Only the pinned testnet assets may be moved:
- * USDC (issuer from the anchor's `KNOWN_ISSUERS` pin) and native XLM. An
- * agent-supplied look-alike asset code is refused here.
+ * native XLM, USDC (issuer from the anchor's `KNOWN_ISSUERS` pin) and the demo
+ * `PGUSD` (throwaway issuer). An agent-supplied look-alike asset code is
+ * refused here.
  */
 import { Asset } from "@stellar/stellar-sdk";
 import { KNOWN_ISSUERS } from "../anchor/config.ts";
 
 /** The pinned testnet USDC issuer (anchor config, docs/contracts DEPLOYED.md). */
 export const TESTNET_USDC_ISSUER = KNOWN_ISSUERS["tr-mock-anchor.fly.dev"]?.USDC ?? "";
+
+/** The demo `PGUSD` issuer (`w1-iss`; contracts/DEPLOYED.md). */
+export const TESTNET_PGUSD_ISSUER = "GB7YX7MYCIGU6DRSBACQ4HJHQAVUP4K7BHT7NP5VP6IYVACDSEF3F2EE";
 
 export interface AssetSpec {
   code: string;
@@ -21,11 +25,12 @@ export interface AssetRegistry {
   get(code: string): AssetSpec | undefined;
 }
 
-/** USDC + XLM only. Codes are matched case-insensitively after trimming. */
+/** XLM + USDC + PGUSD. Codes are matched case-insensitively after trimming. */
 export function defaultAssetRegistry(): AssetRegistry {
   const table: Record<string, AssetSpec> = {
     XLM: { code: "XLM", native: true },
     USDC: { code: "USDC", issuer: TESTNET_USDC_ISSUER, native: false },
+    PGUSD: { code: "PGUSD", issuer: TESTNET_PGUSD_ISSUER, native: false },
   };
   return { get: (code) => table[code.trim().toUpperCase()] };
 }

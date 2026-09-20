@@ -23,7 +23,8 @@ test("the prompt names every asset and the default from the single list", () => 
   for (const asset of SUPPORTED_ASSETS) {
     assert.ok(prompt.includes(asset), `prompt must mention ${asset}`);
   }
-  assert.match(prompt, new RegExp(`defaults to ${DEFAULT_ASSET}`));
+  assert.match(prompt, new RegExp(`mean ${DEFAULT_ASSET}`));
+  assert.match(prompt, /there is no default/);
   for (const word of Object.keys(ASSET_SYNONYMS)) {
     assert.ok(prompt.includes(word), `prompt must mention the word ${word}`);
   }

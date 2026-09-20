@@ -1,4 +1,5 @@
 import type { Intent } from "@polaris/interfaces";
+import type { BalanceReader } from "./balance.ts";
 
 /**
  * Everything a tool is allowed to touch. Kept deliberately small in the skeleton;
@@ -24,6 +25,13 @@ export interface ToolContext {
   timeZone?: string;
   /** The turn's clock, for "tomorrow"/"next Friday" resolution and tests. */
   now?: Date;
+  /**
+   * Reads the connected wallet's balances from Horizon (T1). Injected because
+   * the agent core never talks to the chain itself: the app builds it from
+   * `stellar_config`, tests supply a fake. Absent means `get_balance` cannot
+   * read anything and says so instead of guessing.
+   */
+  readBalances?: BalanceReader;
 }
 
 /**
@@ -51,6 +59,13 @@ export interface AgentTool<Input = unknown, Output = unknown> {
    */
   toIntent?(input: Input, ctx: ToolContext): Intent;
   run(input: Input, ctx: ToolContext): Promise<Output>;
+  /**
+   * Optional deterministic spoken form of `run`'s output (T1). When present the
+   * loop speaks this sentence instead of the raw tool JSON, so a read-only tool
+   * can answer aloud without a second model turn. It must be a short sentence
+   * and must never contain a secret.
+   */
+  toSpeech?(output: Output): string;
 }
 
 /** Chain tools take an `Intent` (see docs/interfaces.md §2). */
