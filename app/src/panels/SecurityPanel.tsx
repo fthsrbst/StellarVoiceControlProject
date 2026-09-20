@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { PanelNote, PanelShell } from "@/panels/PanelShell";
@@ -6,11 +6,15 @@ import { useTxRun } from "@/lib/useTxRun";
 import type { TxRunOutcome } from "@/lib/txPipeline";
 import {
   DEFAULT_LIMITS,
+  effectiveFields,
+  formatAmount,
+  mergeAliasLines,
   stateLines,
   type AliasInput,
   type LimitsFields,
   type PlanStep,
   type ProfileMode,
+  type SecurityAction,
   type SecurityState,
 } from "@/lib/guardState.ts";
 import {
@@ -23,7 +27,7 @@ import {
   type BuiltPlan,
 } from "@/lib/guardStateLive.ts";
 import { AliasEditor } from "./security/AliasEditor.tsx";
-import { ProfileForm, type SecurityAction } from "./security/ProfileForm.tsx";
+import { ProfileForm } from "./security/ProfileForm.tsx";
 
 /** Load lifecycle for the on-chain state. */
 type Loaded =
@@ -50,6 +54,9 @@ export function SecurityPanel() {
   const [revokeAllowance, setRevokeAllowance] = useState(false);
   const [plan, setPlan] = useState<BuiltPlan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
+  const [savedAliases, setSavedAliases] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const tx = useTxRun();
 
   const refresh = useCallback(async () => {
@@ -62,9 +69,9 @@ export function SecurityPanel() {
       if (rule) {
         setFields((current) => ({
           ...current,
-          threshold: format(rule.auto_approve_limit),
-          perTx: format(rule.per_tx_limit),
-          daily: format(rule.daily_limit),
+          threshold: formatAmount(rule.auto_approve_limit),
+          perTx: formatAmount(rule.per_tx_limit),
+          daily: formatAmount(rule.daily_limit),
           knownRecipientsOnly: rule.known_recipients_only,
         }));
       }
@@ -77,10 +84,19 @@ export function SecurityPanel() {
 
   const state = loaded.kind === "ok" ? loaded.state : null;
   const lines = useMemo(() => (state ? stateLines(state) : []), [state]);
+  const aliases = useMemo(
+    () => (state ? mergeAliasLines(state.aliases, savedAliases) : []),
+    [state, savedAliases],
+  );
 
-  /** Build the plan for an action and stop if it cannot be built. */
+  /** Build the plan for an action, run it, and stop if it cannot be built. */
   const buildPlan = useCallback(
-    async (build: () => Promise<BuiltPlan>) => {
+    async (build: () => Promise<BuiltPlan>): Promise<TxRunOutcome[]> => {
+      // In-flight guard: the plan build awaits before `tx.state` turns running,
+      // so a fast double click could otherwise start two sequences.
+      if (busyRef.current) return [];
+      busyRef.current = true;
+      setBusy(true);
       setPlan(null);
       setPlanError(null);
       tx.reset();
@@ -88,11 +104,17 @@ export function SecurityPanel() {
         const next = await build();
         setPlan(next);
         if (next.steps.length > 0) {
-          await tx.run(next.steps as PlanStep[]);
+          const outcomes = await tx.run(next.steps as PlanStep[]);
           await refresh();
+          return outcomes;
         }
+        return [];
       } catch (error) {
         setPlanError(error instanceof Error ? error.message : String(error));
+        return [];
+      } finally {
+        busyRef.current = false;
+        setBusy(false);
       }
     },
     [refresh, tx],
@@ -101,28 +123,35 @@ export function SecurityPanel() {
   const onAction = useCallback(
     (action: SecurityAction) => {
       if (!state) return;
-      const effective: LimitsFields =
-        action === "baseline" ? { ...fields, threshold: "0" } : fields;
+      const effective = effectiveFields(mode, fields);
       if (action === "baseline") {
-        void buildPlan(() => planBaseline(fields, state));
+        void buildPlan(() => planBaseline(effective, state));
         return;
       }
       if (action === "enable") void buildPlan(() => planEnable(effective, executor.trim(), state));
       if (action === "tighten") void buildPlan(() => planTighten(effective, state));
       if (action === "disable") void buildPlan(() => planDisable(revokeAllowance, state));
     },
-    [buildPlan, executor, fields, revokeAllowance, state],
+    [buildPlan, executor, fields, mode, revokeAllowance, state],
   );
 
   const onSaveAliases = useCallback(
     (entries: AliasInput[]) => {
       if (!state) return;
-      void buildPlan(() => planSetAliases(entries, state));
+      void buildPlan(() => planSetAliases(entries, state)).then((outcomes) => {
+        // Only names whose step actually submitted join the on-chain book.
+        const saved = entries.filter((_entry, index) => outcomes[index]?.status === "submitted");
+        if (saved.length > 0) {
+          setSavedAliases((previous) =>
+            Object.fromEntries([...Object.entries(previous), ...saved.map((e) => [e.alias, e.address])]),
+          );
+        }
+      });
     },
     [buildPlan, state],
   );
 
-  const running = tx.state === "running";
+  const running = busy || tx.state === "running";
 
   return (
     <PanelShell
@@ -172,7 +201,7 @@ export function SecurityPanel() {
               onAction={onAction}
             />
 
-            <AliasEditor aliases={state.aliases} running={running} onSave={onSaveAliases} />
+            <AliasEditor aliases={aliases} running={running} onSave={onSaveAliases} />
 
             {planError ? (
               <p className="text-xs text-polaris-danger" role="alert">
@@ -208,13 +237,6 @@ export function SecurityPanel() {
       </div>
     </PanelShell>
   );
-}
-
-/** Raw units -> decimal string, without importing the chain SDK into the view. */
-function format(raw: bigint): string {
-  const whole = raw / 10_000_000n;
-  const frac = (raw % 10_000_000n).toString().padStart(7, "0").replace(/0+$/, "");
-  return frac ? `${whole}.${frac}` : `${whole}`;
 }
 
 /** The per-step outcome badge: text plus colour, never colour alone. */

@@ -5,16 +5,20 @@ import {
   BASELINE_STEP_ORDER,
   DEFAULT_LIMITS,
   ENABLE_STEP_ORDER,
+  actionForMode,
   changeKind,
   disableStepOrder,
   effectLine,
+  effectiveFields,
   isArmed,
   matchesOrder,
+  mergeAliasLines,
   parseAliasEditor,
   profileModeOf,
   readBackBaseline,
   readBackDisable,
   readBackEnable,
+  readBackTighten,
   ruleFromFields,
   stateLines,
   stepIntent,
@@ -71,7 +75,10 @@ test("validateBaseline allows a zero threshold and keeps the executor unset", ()
   const ok = validateBaseline(fields(), NATIVE_SAC);
   assert.equal(ok.ok, true);
   assert.equal(ok.rule?.auto_approve_limit, 0n);
-  assert.equal(ok.rule?.known_recipients_only, false);
+  assert.equal(ok.rule?.known_recipients_only, true);
+
+  const off = validateBaseline(fields({ knownRecipientsOnly: false }), NATIVE_SAC);
+  assert.equal(off.rule?.known_recipients_only, false);
 });
 
 test("profileModeOf maps the chain state, never widening it", () => {
@@ -131,6 +138,39 @@ test("stepLabel and stepIntent describe a plan step", () => {
   assert.equal(intent.kind, "guard_policy");
   assert.equal(intent.asset, "XLM");
   assert.equal(intent.amount, "5");
+  // The amount is the step's real one, not the threshold for every step.
+  assert.equal(stepIntent("approve", fields(), "XLM").amount, DEFAULT_LIMITS.allowance);
+  assert.equal(stepIntent("set_executor", fields(), "XLM").amount, "0");
+  assert.equal(stepIntent("revoke_executor", fields(), "XLM").amount, "0");
+});
+
+test("the profile mode drives the fields and the action (M2)", () => {
+  const typed = fields({ threshold: "5" });
+  assert.equal(effectiveFields("always_ask", typed).threshold, "0");
+  assert.equal(effectiveFields("auto_under_limit", typed).threshold, "5");
+
+  assert.equal(actionForMode("always_ask", false), "baseline");
+  assert.equal(actionForMode("always_ask", true), "baseline");
+  assert.equal(actionForMode("auto_under_limit", false), "enable");
+  assert.equal(actionForMode("auto_under_limit", true), "tighten");
+});
+
+test("readBackTighten names the auto-approve threshold too (N4)", () => {
+  assert.match(readBackTighten(fields({ threshold: "5" }), "XLM"), /auto-approve up to 5 XLM/);
+});
+
+test("mergeAliasLines unions loaded and just-saved names, newest wins (M3)", () => {
+  const loaded = [
+    { alias: "acc2", onChain: EXECUTOR, status: "ok" as const },
+    { alias: "bob", onChain: null, status: "error" as const },
+  ];
+  const merged = mergeAliasLines(loaded, { bob: OWNER, carol: OWNER });
+  assert.deepEqual(merged, [
+    { alias: "acc2", onChain: EXECUTOR, status: "ok" },
+    { alias: "bob", onChain: OWNER, status: "ok" },
+    { alias: "carol", onChain: OWNER, status: "ok" },
+  ]);
+  assert.equal(merged.find((line) => line.alias === "bob")?.status, "ok");
 });
 
 test("stateLines render the decoded on-chain state", () => {
@@ -145,7 +185,7 @@ test("stateLines render the decoded on-chain state", () => {
     executor: EXECUTOR,
     spentTodayRaw: 3_0000000n,
     allowanceRaw: 140_0000000n,
-    aliases: [{ alias: "acc2", onChain: EXECUTOR }],
+    aliases: [{ alias: "acc2", onChain: EXECUTOR, status: "ok" }],
   };
   const lines = stateLines(state);
   const value = (label: string) => lines.find((line) => line.label === label)?.value;

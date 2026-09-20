@@ -56,6 +56,16 @@ export interface AliasInput {
   address: string;
 }
 
+/**
+ * One alias row: the on-chain value plus why it may be absent. `error` means the
+ * read failed (unknown state); `missing` means the name is genuinely not on chain.
+ */
+export interface AliasLine {
+  alias: string;
+  onChain: string | null;
+  status: "ok" | "missing" | "error";
+}
+
 /** A decoded on-chain state plus the addresses it was read with. */
 export interface SecurityState {
   owner: string;
@@ -70,7 +80,7 @@ export interface SecurityState {
   executor: string | null;
   spentTodayRaw: bigint;
   allowanceRaw: bigint | null;
-  aliases: { alias: string; onChain: string | null }[];
+  aliases: AliasLine[];
 }
 
 function messageOf(error: unknown): string {
@@ -144,7 +154,7 @@ export function baselineRule(fields: LimitsFields, assetContractId: string): gua
     per_tx_limit: guard.toRawUnits(fields.perTx),
     daily_limit: guard.toRawUnits(fields.daily),
     allowed_assets: [assetContractId],
-    known_recipients_only: false,
+    known_recipients_only: fields.knownRecipientsOnly,
   };
 }
 
@@ -178,6 +188,33 @@ export function profileModeOf(state: Pick<SecurityState, "rule" | "executor">): 
 /** Whether the account is armed for unattended payments (executor + threshold > 0). */
 export function isArmed(state: Pick<SecurityState, "rule" | "executor">): boolean {
   return profileModeOf(state) === "auto_under_limit";
+}
+
+/** A primary action the profile form can request. */
+export type SecurityAction = "baseline" | "enable" | "tighten" | "disable";
+
+/**
+ * The fields an action is actually built from: "Always ask" forces the threshold
+ * to 0, so switching back from a typed limit can never arm it. Only
+ * "Auto under limit" keeps the owner's threshold.
+ */
+export function effectiveFields(mode: ProfileMode, fields: LimitsFields): LimitsFields {
+  return mode === "always_ask" ? { ...fields, threshold: "0" } : fields;
+}
+
+/**
+ * The action the selected profile requests: "Always ask" builds the Always-ask
+ * baseline (threshold 0, no executor); "Auto under limit" arms the typed
+ * threshold (or tightens it when already armed).
+ */
+export function actionForMode(mode: ProfileMode, armed: boolean): SecurityAction {
+  if (mode === "always_ask") return "baseline";
+  return armed ? "tighten" : "enable";
+}
+
+/** Raw units -> decimal string; the panel's single amount formatter. */
+export function formatAmount(raw: bigint): string {
+  return guard.fromRawUnits(raw);
 }
 
 /** One line of plain-language state for the panel's state card. */
@@ -260,8 +297,9 @@ export function readBackBaseline(fields: LimitsFields, symbol: string): string {
 /** Read-back sentence for tightening/changing the rule. */
 export function readBackTighten(fields: LimitsFields, symbol: string): string {
   return (
-    `Change the spending rule to per payment ${fields.perTx} ${symbol}, per day ${fields.daily} ` +
-    `${symbol}, ${fields.knownRecipientsOnly ? "saved contacts only" : "anyone"}.`
+    `Change the spending rule to auto-approve up to ${fields.threshold} ${symbol}, per payment ` +
+    `${fields.perTx} ${symbol}, per day ${fields.daily} ${symbol}, ` +
+    `${fields.knownRecipientsOnly ? "saved contacts only" : "anyone"}.`
   );
 }
 
@@ -312,6 +350,23 @@ export function parseAliasEditor(text: string): { entries: AliasInput[]; errors:
   return { entries, errors };
 }
 
+/**
+ * The alias book the panel shows: the union of names read from chain/config and
+ * names just saved through the panel, so a fresh save is never dropped while the
+ * next read is in flight.
+ */
+export function mergeAliasLines(
+  loaded: readonly AliasLine[],
+  saved: Readonly<Record<string, string>>,
+): AliasLine[] {
+  const byAlias = new Map<string, AliasLine>();
+  for (const line of loaded) byAlias.set(line.alias, line);
+  for (const [alias, address] of Object.entries(saved)) {
+    byAlias.set(alias, { alias, onChain: address, status: "ok" });
+  }
+  return [...byAlias.values()].sort((a, b) => a.alias.localeCompare(b.alias));
+}
+
 /** Every step kind the panel can plan. */
 export type PlanStepKind = approval.ApprovalStepKind | "set_alias";
 
@@ -335,12 +390,22 @@ export function stepLabel(kind: PlanStepKind): string {
   return STEP_LABELS[kind];
 }
 
-/** The intent recorded with a step's approval request (kind `guard_policy`). */
+/**
+ * The intent recorded with a step's approval request (kind `guard_policy`). The
+ * amount is the step's real one: the allowance for `approve`, the typed
+ * threshold for `set_rule`, and `0` for the executor/revoke calls.
+ */
 export function stepIntent(kind: PlanStepKind, fields: LimitsFields, symbol: string): Intent {
+  const amount =
+    kind === "approve"
+      ? fields.allowance
+      : kind === "set_rule"
+        ? fields.threshold.trim() || "0"
+        : "0";
   return {
     kind: "guard_policy",
     asset: symbol,
-    amount: fields.threshold.trim().length > 0 ? fields.threshold : "0",
+    amount,
     source: `security panel: ${kind}`,
   };
 }

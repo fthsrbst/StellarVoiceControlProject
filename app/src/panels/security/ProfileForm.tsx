@@ -1,7 +1,9 @@
 import { Button } from "@/components/ui/button";
 import {
+  actionForMode,
   changeKind,
   effectLine,
+  effectiveFields,
   isArmed,
   readBackBaseline,
   readBackDisable,
@@ -12,11 +14,9 @@ import {
   validateRuleFields,
   type LimitsFields,
   type ProfileMode,
+  type SecurityAction,
   type SecurityState,
 } from "@/lib/guardState.ts";
-
-/** The primary actions the form can request. */
-export type SecurityAction = "baseline" | "enable" | "tighten" | "disable";
 
 export interface ProfileFormProps {
   state: SecurityState;
@@ -56,26 +56,31 @@ export function ProfileForm({
   onAction,
 }: ProfileFormProps) {
   const armed = isArmed(state);
-  const hasRule = state.rule !== null;
-  const enableValidation = validateLimits(fields, {
+  // The mode drives the plan: "Always ask" forces the threshold to 0 and builds
+  // the baseline; only "Auto under limit" keeps the typed threshold.
+  const effective = effectiveFields(mode, fields);
+  const primary = actionForMode(mode, armed);
+  const enableValidation = validateLimits(effective, {
     executor,
     assetContractId: state.assetContractId,
   });
-  const baselineValidation = validateBaseline(fields, state.assetContractId);
-  const ruleValidation = validateRuleFields(fields, state.assetContractId);
-  const classification = changeKind(state, fields);
+  const baselineValidation = validateBaseline(effective, state.assetContractId);
+  const ruleValidation = validateRuleFields(effective, state.assetContractId);
+  const classification = changeKind(state, effective);
 
-  const readBack = !hasRule
-    ? readBackBaseline(fields, state.assetSymbol)
-    : !armed && enableValidation.draft
-      ? readBackEnable(enableValidation.draft, state.assetSymbol)
-      : readBackTighten(fields, state.assetSymbol);
+  const readBack =
+    primary === "baseline"
+      ? readBackBaseline(effective, state.assetSymbol)
+      : primary === "enable" && enableValidation.draft
+        ? readBackEnable(enableValidation.draft, state.assetSymbol)
+        : readBackTighten(effective, state.assetSymbol);
 
-  const errors = !hasRule
-    ? baselineValidation.errors
-    : armed
-      ? ruleValidation.errors
-      : enableValidation.errors;
+  const errors =
+    primary === "baseline"
+      ? baselineValidation.errors
+      : primary === "enable"
+        ? enableValidation.errors
+        : ruleValidation.errors;
 
   return (
     <section className="space-y-3 rounded-lg border border-polaris-line bg-polaris-panel/60 p-3">
@@ -190,7 +195,7 @@ export function ProfileForm({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {!hasRule ? (
+        {primary === "baseline" ? (
           <Button
             size="sm"
             disabled={running || !baselineValidation.ok}
@@ -199,7 +204,7 @@ export function ProfileForm({
             Set up Always-ask baseline
           </Button>
         ) : null}
-        {!armed ? (
+        {primary === "enable" ? (
           <Button
             size="sm"
             disabled={running || !enableValidation.ok}
@@ -207,21 +212,22 @@ export function ProfileForm({
           >
             Enable auto-pay
           </Button>
-        ) : (
-          <>
-            <Button
-              size="sm"
-              variant="secondary"
-              disabled={running || !ruleValidation.ok}
-              onClick={() => onAction("tighten")}
-            >
-              Apply limits
-            </Button>
-            <Button size="sm" variant="danger" disabled={running} onClick={() => onAction("disable")}>
-              Disable auto-pay
-            </Button>
-          </>
-        )}
+        ) : null}
+        {primary === "tighten" ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={running || !ruleValidation.ok}
+            onClick={() => onAction("tighten")}
+          >
+            Apply limits
+          </Button>
+        ) : null}
+        {armed ? (
+          <Button size="sm" variant="danger" disabled={running} onClick={() => onAction("disable")}>
+            Disable auto-pay
+          </Button>
+        ) : null}
       </div>
 
       {armed ? (

@@ -90,3 +90,10 @@ export * as suggest from "./suggest/index.ts";
 export * as p2p from "./p2p/index.ts";
 // Root type re-exports so the shell can type a P2P client without a namespace import.
 export type { Offer, OfferState, P2pCall, P2pClient } from "./p2p/index.ts";
+/**
+ * Resequencing helpers for multi-step approval flows: every step built up front
+ * embeds the same account sequence, so each one is rewritten to its source's
+ * current next sequence right before it is approved. Re-exported for the app's
+ * shared `txPipeline` (the single no-copy source is `live/submit.ts`).
+ */
+export { resequenceEnvelope, setSequence } from "./live/submit.ts";
