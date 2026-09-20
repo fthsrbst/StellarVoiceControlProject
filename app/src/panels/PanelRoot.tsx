@@ -1,4 +1,5 @@
 import { ApprovalPanel } from "@/panels/ApprovalPanel";
+import { DebugPanel } from "@/panels/DebugPanel";
 import { SettingsPanel } from "@/panels/SettingsPanel";
 import { WalletPanel } from "@/panels/WalletPanel";
 import type { PanelName } from "@/panels/panelRoutes";
@@ -16,5 +17,7 @@ export function PanelRoot({ panel }: { panel: PanelName }) {
       return <ApprovalPanel />;
     case "settings":
       return <SettingsPanel />;
+    case "debug":
+      return <DebugPanel />;
   }
 }
