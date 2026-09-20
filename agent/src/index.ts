@@ -37,6 +37,19 @@ export {
   type LlmTurn,
 } from "./loop.ts";
 export { POLARIS_SYSTEM_PROMPT, withDetectedLanguage } from "./prompt.ts";
+export { buildSystemPrompt, type SystemPromptInput } from "./capabilities.ts";
+export {
+  AccountRefLlm,
+  buildAccountBook,
+  normalizeAccountRefs,
+  normalizeRecipient,
+  OWNER_ALIAS,
+  RECIPIENT_ALIAS,
+  shortAddress,
+  type AccountBook,
+  type AccountRef,
+  type AliasMap,
+} from "./accountRefs.ts";
 export {
   ASSET_SYNONYMS,
   DEFAULT_ASSET,

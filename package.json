@@ -21,6 +21,7 @@
     "start:app": "npm run tauri:dev -w @polaris/app",
     "agent": "npm run start -w @polaris/agent",
     "e2e:intent": "node --env-file-if-exists=.env scripts/e2e-intent.mjs",
+    "e2e:prompt": "node --env-file-if-exists=.env scripts/e2e-prompt-eval.mjs",
     "e2e:build-xdr": "node --env-file-if-exists=.env scripts/e2e-build-xdr.mjs",
     "bridge:fixture": "node --env-file-if-exists=.env scripts/bridge-fixture.mjs"
   },

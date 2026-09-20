@@ -14,6 +14,7 @@
  * bad intent.
  */
 import type { Intent } from "@polaris/interfaces";
+import { normalizeRecipient } from "../accountRefs.ts";
 import { DEFAULT_ASSET, describeSupportedAssets, normalizeAsset } from "../assets.ts";
 import { AgentError } from "../errors.ts";
 import type { AgentTool, ToolContext } from "./registry.ts";
@@ -78,7 +79,11 @@ export function parseSendPayment(input: unknown, ctx: ToolContext): Intent {
         `${describeSupportedAssets()}`,
     );
   }
-  const recipient = requireText(raw.recipient, "recipient");
+  const rawRecipient = requireText(raw.recipient, "recipient");
+  // Step F2: a recipient the model returned as "wallet 2" / "hesap 2" is still a
+  // known alias once normalised. A name that is not a known account stays
+  // verbatim — resolution of address-book names is the chain lane's job.
+  const recipient = normalizeRecipient(rawRecipient, ctx.aliases) ?? rawRecipient;
   const memo = raw.memo === undefined || raw.memo === null ? undefined : requireText(raw.memo, "memo");
 
   return {
