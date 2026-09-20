@@ -29,7 +29,13 @@ export interface BridgePayload {
   networkPassphrase: string;
   /** The G address the transaction's source must be signed by. */
   address: string;
-  payloadHash: string;
+  /**
+   * Optional hex digest of the unsigned XDR shown on the approval card. The page
+   * accepts either the transaction signature-base hash (`tx.hash()`, what the
+   * approval flow emits) or the SHA-256 of the base64 XDR string (W4b); see
+   * `docs/freighter-bridge.md` §2.
+   */
+  payloadHash?: string;
   summary: BridgeSummary;
 }
 

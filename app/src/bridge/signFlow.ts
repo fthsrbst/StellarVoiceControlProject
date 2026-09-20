@@ -37,6 +37,7 @@ export interface SignFlowOptions {
     unsignedXdr: string;
     networkPassphrase: string;
     address: string;
+    payloadHash?: string;
   }) => VerifySignedXdrResult;
   /**
    * Awaited after the payload is fetched and before the wallet is prompted, so
@@ -45,18 +46,27 @@ export interface SignFlowOptions {
   beforeConnect?: () => Promise<void>;
 }
 
-/** Heuristic for "the user said no" across wallet error shapes. */
-export function isUserRejection(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /reject|declin|denied|cancel|refus/i.test(message);
-}
-
 function messageOf(error: unknown): string {
   if (error instanceof Error) return error.message;
   if (typeof error === "object" && error !== null && "message" in error) {
     return String((error as { message: unknown }).message);
   }
   return String(error);
+}
+
+/** Freighter's decline code in `@stellar/freighter-api`, preserved by the kit's `parseError`. */
+const FREIGHTER_DECLINED_CODE = -4;
+
+/**
+ * Heuristic for "the user said no" across wallet error shapes. The Wallets Kit
+ * rejects with a plain `{ code, message, ext }` object (not an `Error`), so the
+ * message is read with `messageOf` and a known decline code counts as well.
+ */
+export function isUserRejection(error: unknown): boolean {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    if ((error as { code: unknown }).code === FREIGHTER_DECLINED_CODE) return true;
+  }
+  return /reject|declin|denied|cancel|refus/i.test(messageOf(error));
 }
 
 /**
@@ -176,6 +186,7 @@ export async function runSignFlow(options: SignFlowOptions): Promise<SignFlowSta
     unsignedXdr: payload.xdr,
     networkPassphrase: payload.networkPassphrase,
     address: payload.address,
+    payloadHash: payload.payloadHash,
   });
   if (!check.ok) {
     log("verify", `failed: ${check.reason}`);

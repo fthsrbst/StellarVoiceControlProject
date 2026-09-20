@@ -129,13 +129,15 @@ function summary(state: SignFlowState): HTMLElement | null {
       el("span", {}, [payload.networkPassphrase]),
     ]),
   ];
-  if (payload.summary.explorerUrl) {
+  const explorerUrl = payload.summary.explorerUrl;
+  const safeExplorerUrl = explorerUrl ? safeHttpsUrl(explorerUrl) : null;
+  if (safeExplorerUrl) {
     children.push(
       el(
         "a",
         {
           class: "explorer",
-          href: { href: payload.summary.explorerUrl },
+          href: { href: safeExplorerUrl },
           rel: "noopener noreferrer",
           target: "_blank",
         },
@@ -144,6 +146,16 @@ function summary(state: SignFlowState): HTMLElement | null {
     );
   }
   return el("section", { class: "summary" }, children);
+}
+
+/** Returns the URL only when it is a safe `https:` link; anything else is dropped. */
+function safeHttpsUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 function statusBlock(state: SignFlowState): HTMLElement {
@@ -234,5 +246,7 @@ if (!token) {
           render(lastState);
         }
       : undefined,
+  }).catch((error) => {
+    window.console.error("[bridge] the sign flow crashed", error);
   });
 }

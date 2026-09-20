@@ -11,7 +11,7 @@
 //
 //   npm run bridge:fixture              # needs POLARIS_OWNER_ADDRESS + POLARIS_ALIASES
 //   npm run bridge:fixture -- --selftest  # offline end-to-end smoke test (no Freighter)
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
@@ -24,6 +24,7 @@ import {
   Horizon,
   Keypair,
   Operation,
+  Transaction,
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
 
@@ -70,11 +71,25 @@ export function parseAliases(value) {
     .filter((entry) => entry.length > 0);
 }
 
-function withTimeout(promise, ms) {  let timer;
+function withTimeout(promise, ms) {
+  let timer;
   const timeout = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** Constant-time token comparison. The token is 192-bit, so its length is not a secret. */
+function tokenMatches(provided, expected) {
+  if (typeof provided !== "string") return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/** SHA-256 hex of the UTF-8 bytes of a string. */
+function sha256Hex(value) {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 /** Sends a JSON response with the given status. */
@@ -189,25 +204,52 @@ export async function buildUnsignedPayload({
   };
 }
 
-/** Verifies that `signedXdr` carries a valid signature by the owner. */
-function verifySigned({ signedXdr, networkPassphrase, owner }) {
-  let transaction;
+/**
+ * Verifies that `signedXdr` is the *same transaction* as `unsignedXdr` and that
+ * it carries a valid signature by the owner. This mirrors the page's verifier
+ * (`app/src/bridge/verify.ts`): the signature-base hashes must match, so a wallet
+ * that returns a different transaction is rejected even when the source and the
+ * operation count are unchanged. Exported so a test can pin the two together.
+ */
+export function verifySigned({ signedXdr, unsignedXdr, networkPassphrase, owner, payloadHash }) {
+  let signed;
+  let unsigned;
   try {
-    transaction = TransactionBuilder.fromXDR(signedXdr, networkPassphrase);
+    signed = TransactionBuilder.fromXDR(signedXdr, networkPassphrase);
   } catch (error) {
     return { verified: false, reason: `signed XDR is malformed: ${error.message}` };
   }
+  try {
+    unsigned = TransactionBuilder.fromXDR(unsignedXdr, networkPassphrase);
+  } catch (error) {
+    return { verified: false, reason: `unsigned XDR is malformed: ${error.message}` };
+  }
+  if (!(signed instanceof Transaction) || !(unsigned instanceof Transaction)) {
+    return { verified: false, reason: "fee-bump envelopes are not supported" };
+  }
+
+  const signedHash = Buffer.from(signed.hash()).toString("hex");
+  const unsignedHash = Buffer.from(unsigned.hash()).toString("hex");
+  if (signedHash !== unsignedHash) {
+    return {
+      verified: false,
+      reason: `signed transaction ${signedHash} is not the unsigned transaction ${unsignedHash}`,
+    };
+  }
+  if (payloadHash && payloadHash !== unsignedHash && payloadHash !== sha256Hex(unsignedXdr)) {
+    return { verified: false, reason: `payload hash does not match the unsigned transaction` };
+  }
+
   const signer = Keypair.fromPublicKey(owner);
-  const hash = transaction.hash();
-  const matched = transaction.signatures.some((signature) => {
+  const matched = signed.signatures.some((signature) => {
     try {
-      return signer.verify(hash, signature.signature);
+      return signer.verify(signed.hash(), signature.signature);
     } catch {
       return false;
     }
   });
   if (!matched) return { verified: false, reason: `no signature by ${owner}` };
-  return { verified: true, hash: Buffer.from(hash).toString("hex") };
+  return { verified: true, hash: signedHash };
 }
 
 async function serveStatic(response, pathname) {
@@ -254,7 +296,7 @@ async function startFixtureServer({ owner, destination, horizonUrl, networkPassp
 
     if (pathname === "/sign/payload" && request.method === "GET") {
       const provided = url.searchParams.get("t");
-      if (provided !== token) {
+      if (!tokenMatches(provided, token)) {
         sendJson(response, 403, { error: "unknown token" });
         return;
       }
@@ -268,7 +310,7 @@ async function startFixtureServer({ owner, destination, horizonUrl, networkPassp
 
     if (pathname === "/sign/result" && request.method === "POST") {
       const provided = url.searchParams.get("t");
-      if (provided !== token) {
+      if (!tokenMatches(provided, token)) {
         sendJson(response, 403, { error: "unknown token" });
         return;
       }
@@ -281,7 +323,13 @@ async function startFixtureServer({ owner, destination, horizonUrl, networkPassp
         const body = await readJson(request);
         let outcome;
         if (body && body.ok === true && typeof body.signedXdr === "string") {
-          const check = verifySigned({ signedXdr: body.signedXdr, networkPassphrase, owner });
+          const check = verifySigned({
+            signedXdr: body.signedXdr,
+            unsignedXdr: payload.xdr,
+            payloadHash: payload.payloadHash,
+            networkPassphrase,
+            owner,
+          });
           if (check.verified) {
             console.log(`signature valid ✓  (tx hash ${check.hash})`);
             outcome = { verified: true };
@@ -296,8 +344,9 @@ async function startFixtureServer({ owner, destination, horizonUrl, networkPassp
           console.log("page posted a malformed result");
           outcome = { verified: false, reason: "malformed result" };
         }
-        response.writeHead(204).end();
+        response.writeHead(204);
         response.once("finish", () => resolveResult(outcome));
+        response.end();
       })();
       return;
     }

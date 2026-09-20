@@ -34,7 +34,7 @@ interface FakeWalletInit {
   address: string;
   networkPassphrase?: string;
   connectError?: Error;
-  signError?: Error;
+  signError?: unknown;
   signedXdr?: string;
 }
 
@@ -42,7 +42,7 @@ class FakeWallet implements BridgeWallet {
   address: string;
   networkPassphrase: string | undefined;
   connectError: Error | undefined;
-  signError: Error | undefined;
+  signError: unknown;
   signedXdr: string | undefined;
   signCalls = 0;
 
@@ -124,6 +124,86 @@ test("a user rejection ends in the rejected state and posts the code", async () 
     code: "rejected",
     error: "User declined to sign the transaction",
   });
+});
+
+test("a kit-shaped rejection object is classified as rejected", async () => {
+  const { payload } = makePayloadFixture();
+  const http = new FakeHttp(payload);
+  const wallet = new FakeWallet({
+    address: payload.address,
+    networkPassphrase: payload.networkPassphrase,
+    signError: { code: -4, message: "The user rejected this request.", ext: [] },
+  });
+
+  const final = await runSignFlow({ token: "tok", http, wallet });
+
+  assert.equal(final.status, "rejected");
+  assert.equal(final.code, "rejected");
+  const post = firstPost(http);
+  assert.equal(post.ok, false);
+  if (!post.ok) assert.equal(post.code, "rejected");
+});
+
+test("a kit-shaped error with the decline code alone is rejected", async () => {
+  const { payload } = makePayloadFixture();
+  const http = new FakeHttp(payload);
+  const wallet = new FakeWallet({
+    address: payload.address,
+    networkPassphrase: payload.networkPassphrase,
+    signError: { code: -4, message: "Freighter returned an error" },
+  });
+
+  const final = await runSignFlow({ token: "tok", http, wallet });
+
+  assert.equal(final.status, "rejected");
+  assert.equal(final.code, "rejected");
+});
+
+test("a string rejection is classified as rejected", async () => {
+  const { payload } = makePayloadFixture();
+  const http = new FakeHttp(payload);
+  const wallet = new FakeWallet({
+    address: payload.address,
+    networkPassphrase: payload.networkPassphrase,
+    signError: "User declined to sign",
+  });
+
+  const final = await runSignFlow({ token: "tok", http, wallet });
+
+  assert.equal(final.status, "rejected");
+  assert.equal(final.code, "rejected");
+});
+
+test("a kit-shaped non-rejection error stays a generic error", async () => {
+  const { payload } = makePayloadFixture();
+  const http = new FakeHttp(payload);
+  const wallet = new FakeWallet({
+    address: payload.address,
+    networkPassphrase: payload.networkPassphrase,
+    signError: { code: -1, message: "Freighter encountered an internal error", ext: [] },
+  });
+
+  const final = await runSignFlow({ token: "tok", http, wallet });
+
+  assert.equal(final.status, "error");
+  assert.equal(final.code, "error");
+});
+
+test("an undefined sign error is not treated as a rejection", async () => {
+  const { payload } = makePayloadFixture();
+  const http = new FakeHttp(payload);
+  const wallet: BridgeWallet = {
+    connect: async () => ({ address: payload.address }),
+    getNetwork: async () => ({ networkPassphrase: payload.networkPassphrase }),
+    signTransaction: async () => {
+      throw undefined;
+    },
+  };
+
+  const final = await runSignFlow({ token: "tok", http, wallet });
+
+  assert.equal(final.status, "error");
+  assert.equal(final.code, "error");
 });
 
 test("a connected address that differs from the payload stops before signing", async () => {
