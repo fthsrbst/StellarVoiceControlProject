@@ -42,7 +42,22 @@ function todo(tool: string): ChainTool {
  */
 // Real payment builder (Intent -> unsigned XDR + decoded summary). Configure it once
 // with `configurePayments(deps)`; calling it before that throws a typed refusal.
+// The shell's composition root (`app/src/lib/chain.ts`) needs the config and
+// alias-book helpers too, so they are re-exported here.
 export { sendPayment } from "./payments/index.ts";
+// `payloadHashOf` is the Stellar *transaction hash* (`Transaction.hash()`), used
+// by the chain summary / explorer URL. It is NOT the agent seam's `payloadHash`
+// (that is the XDR digest, SHA-256 of the base64 unsigned-XDR string); never pass
+// this value to the approval gate. Re-exported so callers can tell them apart.
+export { payloadHashOf } from "./payments/index.ts";
+export {
+  configurePayments,
+  defaultPaymentDeps,
+  parseAliasBook,
+  PaymentRefusal,
+  type AliasBook,
+  type PaymentDeps,
+} from "./payments/index.ts";
 export const swap = todo("swap");
 export const guardPolicy = todo("guardPolicy");
 

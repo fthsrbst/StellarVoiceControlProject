@@ -16,6 +16,7 @@ mod hotkey;
 mod hotkey_flags;
 mod notch;
 mod panels;
+mod stellar_config;
 mod stt;
 mod timing;
 mod tts;
@@ -50,6 +51,7 @@ pub fn run() {
             notch::notch_window_flags,
             hotkey::hotkey_permission,
             panels::open_panel,
+            stellar_config::stellar_config,
         ])
         // Step W0: a panel's close button hides it instead of quitting the app
         // (the overlay's `main` window is never closed, so the close handler is

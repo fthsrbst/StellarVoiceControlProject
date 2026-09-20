@@ -62,11 +62,24 @@ export type ChainTool = (intent: Intent) => Promise<ChainToolResult>;
  * ------------------------------------------------------------------ */
 
 /**
+ * ``payloadHash`` on this seam is the **XDR digest**: lowercase-hex SHA-256 of
+ * the UTF-8 bytes of the base64 unsigned-XDR string (the same definition the
+ * agent seam and the `approval_request` / `approval_result` events use, and the
+ * one the Rust approval gate will recompute without XDR parsing).
+ *
+ * It is **not** the Stellar transaction hash. `Transaction.hash()`
+ * (`payloadHashOf` in `@polaris/stellar`, `stellar/src/payments/summary.ts`) is
+ * a different value that identifies the transaction on-chain and appears only in
+ * the chain summary's explorer URL. The transaction hash must never be passed
+ * where the digest is expected, and vice versa.
+ */
+
+/**
  * Rust-side service exposed to the webview via a Tauri command.
  * Owner A owns the Touch ID approval flow; Owner B consumes signed envelopes.
  */
 export interface SigningService {
-  /** Rejects unless Touch ID approval succeeded for this `payloadHash`. */
+  /** Rejects unless Touch ID approval succeeded for this XDR digest (`payloadHash`). */
   sign(payloadHash: string): Promise<{ signedXdr: string }>;
 }
 
@@ -168,9 +181,15 @@ export type PolarisEvent =
       type: "approval_request";
       intent: Intent;
       summary: ChainToolResult["summary"];
+      /** The XDR digest (SHA-256 of the base64 unsigned-XDR string), never the tx hash. */
       payloadHash: string;
     }
-  | { type: "approval_result"; payloadHash: string; approved: boolean }
+  | {
+      type: "approval_result";
+      /** The XDR digest the decision is bound to (see `approval_request`). */
+      payloadHash: string;
+      approved: boolean;
+    }
   | { type: "tx_submitted"; hash: string; explorerUrl: string }
   | { type: "error"; message: string };
 
@@ -198,4 +217,29 @@ export interface AppInfo {
   /** e.g. "testnet" */
   network: string;
   tauriVersion: string;
+}
+
+/* ------------------------------------------------------------------ *
+ * 7. Chain configuration (Tauri `stellar_config` command)
+ * ------------------------------------------------------------------ */
+
+/**
+ * The non-secret chain configuration the shell reads once from Rust and hands to
+ * the chain tool (`app/src/lib/chain.ts`). Rust mirrors this type byte-for-byte
+ * in `app/src-tauri/src/stellar_config.rs`; it is an allow-list — no secret
+ * (provider key, keeper secret) is ever part of it.
+ *
+ * `ownerAddress` is the sender (a public `G...` address); `null` means the shell
+ * must refuse with "Set POLARIS_OWNER_ADDRESS" rather than guess. `aliases` is
+ * the env-supplied book (`POLARIS_ALIASES`), merged over the committed
+ * `aliases.json` on the TypeScript side.
+ */
+export interface StellarConfig {
+  network: string;
+  rpcUrl: string;
+  horizonUrl: string;
+  networkPassphrase: string;
+  ownerAddress: string | null;
+  aliases: Record<string, string>;
+  guardContractId: string | null;
 }

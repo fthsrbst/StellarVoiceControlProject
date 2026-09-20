@@ -44,6 +44,20 @@ test("a supported code is canonicalised regardless of case", () => {
   assert.equal(parseSendPayment({ amount: "1", asset: "xlm", recipient: "bilal" }, ctx).asset, "XLM");
 });
 
+test("an XLM payment to an alias produces the expected Intent (W1)", () => {
+  const intent = parseSendPayment(
+    { amount: "10", asset: "XLM", recipient: "acc2" },
+    { network: "testnet", transcript: "acc2'ye 10 XLM gönder" },
+  );
+  assert.deepEqual(intent, {
+    kind: "send",
+    asset: "XLM",
+    amount: "10",
+    recipient: "acc2",
+    source: "acc2'ye 10 XLM gönder",
+  });
+});
+
 test("a genuinely unsupported asset is rejected as bad input (step A13)", () => {
   for (const asset of ["EUR", "BTC", "DOGE"]) {
     try {
