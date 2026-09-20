@@ -20,6 +20,7 @@ import type { NavigationRequest, ShellGeometry } from "@polaris/interfaces";
 
 import { StageLabel } from "@/components/StageLabel";
 import { notchPageFor } from "@/lib/navigation";
+import { MoreMenu } from "./MoreMenu";
 import { NotchPanel } from "./NotchPanel";
 import { PromptPanel } from "./PromptPanel";
 import { inlineVoiceStage } from "./shellState";
@@ -229,6 +230,10 @@ export function ShellSurface({
           class, so page state survives a close/reopen within the session. */}
       <div className="notch-panel" aria-hidden={applied !== "panel"}>
         <NotchPanel controller={pageController} />
+        {/* RMTRAY: the "⋯" menu replaces the removed menu-bar tray (panels +
+            Quit). Mounted only while the panel is applied so no focusable
+            control hides inside the collapsed, click-through shell. */}
+        {applied === "panel" ? <MoreMenu /> : null}
       </div>
     </section>
   );
