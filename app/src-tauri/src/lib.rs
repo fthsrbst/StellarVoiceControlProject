@@ -177,18 +177,27 @@ fn apply_activation_policy(app: &mut tauri::App) {
 #[cfg(not(target_os = "macos"))]
 fn apply_activation_policy(_app: &mut tauri::App) {}
 
-/// Tray menu item ids. `MenuEvent::id()` comes back as these exact strings.
-const TRAY_MENU_WALLET: &str = "wallet";
-const TRAY_MENU_SETTINGS: &str = "settings";
-const TRAY_MENU_DEBUG: &str = "debug";
+/// Tray menu item ids that open a panel, in menu order. Each id is exactly the
+/// panel's registry name, so the tray and the `open_panel` command cannot drift.
+const TRAY_MENU_PANELS: &[&str] = &[
+    panels::WALLET,
+    panels::SECURITY,
+    panels::SCHEDULES,
+    panels::SUGGESTIONS,
+    panels::ANCHOR,
+    panels::P2P,
+    panels::SETTINGS,
+    panels::DEBUG,
+];
+
+/// Tray menu item id for quitting. `MenuEvent::id()` comes back as exact strings.
 const TRAY_MENU_QUIT: &str = "quit";
 
 /// Step W0: builds the menu-bar status item.
 ///
-/// "Wallet…", "Settings…" and "Debug…" open their panels through the same
-/// registry the `open_panel` command uses, so the tray and the frontend cannot
-/// drift; "Quit Polaris" exits. The approval panel is deliberately absent: it is
-/// opened by the approval flow, never by hand.
+/// One item per panel opens its window through the same registry the
+/// `open_panel` command uses; "Quit Polaris" exits. The approval panel is
+/// deliberately absent: it is opened by the approval flow, never by hand.
 ///
 /// The icon is the bundled app icon (`tauri-build` embeds it), so the tray needs
 /// no second asset. It is not marked as a template image because the app icon is
@@ -198,9 +207,14 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     use tauri::tray::TrayIconBuilder;
 
     let menu = MenuBuilder::new(app)
-        .text(TRAY_MENU_WALLET, "Wallet…")
-        .text(TRAY_MENU_SETTINGS, "Settings…")
-        .text(TRAY_MENU_DEBUG, "Debug…")
+        .text(panels::WALLET, "Wallet…")
+        .text(panels::SECURITY, "Security & rules…")
+        .text(panels::SCHEDULES, "Schedules…")
+        .text(panels::SUGGESTIONS, "Suggestions…")
+        .text(panels::ANCHOR, "Anchor…")
+        .text(panels::P2P, "P2P…")
+        .text(panels::SETTINGS, "Settings…")
+        .text(panels::DEBUG, "Debug…")
         .separator()
         .text(TRAY_MENU_QUIT, "Quit Polaris")
         .build()?;
@@ -216,26 +230,18 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Routes a tray menu selection. The panel names are the same registry names
-/// the command accepts, so the two entry points cannot drift.
+/// Routes a tray menu selection. Panel ids are the registry names themselves, so
+/// a click is just `panels::open`; anything else is ignored.
 fn handle_tray_menu(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
-    match event.id().as_ref() {
-        TRAY_MENU_WALLET => {
-            if let Err(error) = panels::open(app, panels::WALLET) {
-                eprintln!("polaris: {error}");
-            }
-        }
-        TRAY_MENU_SETTINGS => {
-            if let Err(error) = panels::open(app, panels::SETTINGS) {
-                eprintln!("polaris: {error}");
-            }
-        }
-        TRAY_MENU_DEBUG => {
-            if let Err(error) = panels::open(app, panels::DEBUG) {
-                eprintln!("polaris: {error}");
-            }
-        }
-        TRAY_MENU_QUIT => app.exit(0),
-        _ => {}
+    let id = event.id().as_ref();
+    if id == TRAY_MENU_QUIT {
+        app.exit(0);
+        return;
+    }
+    if !TRAY_MENU_PANELS.contains(&id) {
+        return;
+    }
+    if let Err(error) = panels::open(app, id) {
+        eprintln!("polaris: {error}");
     }
 }

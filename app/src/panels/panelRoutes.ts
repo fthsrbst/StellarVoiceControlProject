@@ -14,11 +14,25 @@
  * the frontend's single source of truth: `@/lib/panels` re-exports it rather
  * than declaring a second list, so adding a panel is one edit here.
  */
-export type PanelName = "wallet" | "approval" | "settings" | "debug";
+export type PanelName =
+  | "wallet"
+  | "approval"
+  | "security"
+  | "schedules"
+  | "suggestions"
+  | "anchor"
+  | "p2p"
+  | "settings"
+  | "debug";
 
 export const PANEL_NAMES: readonly PanelName[] = [
   "wallet",
   "approval",
+  "security",
+  "schedules",
+  "suggestions",
+  "anchor",
+  "p2p",
   "settings",
   "debug",
 ];

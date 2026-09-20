@@ -21,8 +21,16 @@ choose the component.
 | (overlay) | `main` | no hash / `#/` | 780×120 (fixed) | transparent, click-through, non-focusable |
 | Wallet | `panel-wallet` | `#/wallet` | 420×600 | normal window, resizable |
 | Approval | `panel-approval` | `#/approval` | 440×520 | always on top, not resizable |
+| Security | `panel-security` | `#/security` | 460×640 | normal window, resizable |
+| Schedules | `panel-schedules` | `#/schedules` | 460×640 | normal window, resizable |
+| Suggestions | `panel-suggestions` | `#/suggestions` | 460×640 | normal window, resizable |
+| Anchor | `panel-anchor` | `#/anchor` | 460×640 | normal window, resizable |
+| P2P | `panel-p2p` | `#/p2p` | 460×640 | normal window, resizable |
 | Settings | `panel-settings` | `#/settings` | 520×600 | normal window, resizable |
 | Debug | `panel-debug` | `#/debug` | 480×680 | normal window, resizable |
+
+Security, Schedules, Suggestions, Anchor and P2P are skeletons registered now so
+parallel UI workers can each fill one body without registry conflicts.
 
 One instance per label: the first open builds the window, later opens show and
 focus it. Closing a panel **hides** it (`panels::handle_window_event`) so its
@@ -38,7 +46,7 @@ width, height, always-on-top, resizable). Everything else derives from it:
   back as `PanelError::UnknownPanel { name }` (`{"kind":"unknownPanel",…}`);
   window failures as `PanelError::Window { message }`. It never panics.
 - `panels::open(app, name)` — the Rust helper other modules use (the tray menu
-  calls it for Wallet and Settings).
+  calls it for every panel it lists).
 - `is_panel_label(label)` — recognises the `panel-*` namespace, which is also
   what the capability file targets and what the close handler checks.
 
@@ -51,10 +59,18 @@ Polaris is an **accessory** app (no Dock icon, no app menu bar), so the menu-bar
 status item is the only chrome. It is built in `lib.rs::setup_tray`:
 
 - **Wallet…** → `panels::open(app, panels::WALLET)`
-- **Settings…** → `panels::open(app, panels::SETTINGS)`
-- **Debug…** → `panels::open(app, panels::DEBUG)` (the check registry and event
-  tail; see `docs/debug-panel.md`)
+- **Security & rules…** → `panels::SECURITY`
+- **Schedules…** → `panels::SCHEDULES`
+- **Suggestions…** → `panels::SUGGESTIONS`
+- **Anchor…** → `panels::ANCHOR`
+- **P2P…** → `panels::P2P`
+- **Settings…** → `panels::SETTINGS`
+- **Debug…** → `panels::DEBUG` (the check registry and event tail; see
+  `docs/debug-panel.md`)
 - **Quit Polaris** → `app.exit(0)`
+
+Each menu id is exactly its panel's registry name, so the tray and `open_panel`
+share one allow-list (`TRAY_MENU_PANELS` in `lib.rs`).
 
 The approval panel is intentionally **not** in the tray: it is opened by the
 approval flow, never by hand. The tray icon is the bundled app icon
@@ -138,9 +154,9 @@ cargo clippy --manifest-path app/src-tauri/Cargo.toml -- -D warnings
 
 **Automated (covered by tests)**
 
-- `parsePanelRoute` maps the four routes and falls back to the notch for
+- `parsePanelRoute` maps every registered route and falls back to the notch for
   unknown/malformed hashes (`app/src/panels/panelRoutes.test.ts`).
-- The Rust registry is the four known panels, rejects unknown names with
+- The Rust registry is the known panels, rejects unknown names with
   `PanelError::UnknownPanel`, and every spec has sane geometry, a `#/name`
   route and a `panel-*` label (`app/src-tauri/src/panels.rs`).
 - `npm run check`, `npm test -w @polaris/app`, `npm run build -w @polaris/app`,

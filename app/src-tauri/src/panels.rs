@@ -1,9 +1,9 @@
 //! Interactive panel windows (step W0).
 //!
 //! The notch overlay (`notch.rs`) is transparent, click-through and cannot take
-//! focus, so it can never host a real interaction. Wallet, approval, settings and
-//! the debug panel therefore live in ordinary windows, created on demand and
-//! reused afterwards.
+//! focus, so it can never host a real interaction. Wallet, approval, settings,
+//! debug and the milestone skeleton panels therefore live in ordinary windows,
+//! created on demand and reused afterwards.
 //!
 //! This module is the single source of truth for those windows: a fixed
 //! allow-list of [`PanelSpec`]s, one webview per panel label, and the close
@@ -19,6 +19,11 @@ use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 /// only panels that exist; anything else is rejected.
 pub const WALLET: &str = "wallet";
 pub const APPROVAL: &str = "approval";
+pub const SECURITY: &str = "security";
+pub const SCHEDULES: &str = "schedules";
+pub const SUGGESTIONS: &str = "suggestions";
+pub const ANCHOR: &str = "anchor";
+pub const P2P: &str = "p2p";
 pub const SETTINGS: &str = "settings";
 pub const DEBUG: &str = "debug";
 
@@ -69,6 +74,56 @@ pub const PANELS: &[PanelSpec] = &[
         height: 520.0,
         always_on_top: true,
         resizable: false,
+    },
+    PanelSpec {
+        name: SECURITY,
+        label: "panel-security",
+        title: "Polaris Security",
+        route: "#/security",
+        width: 460.0,
+        height: 640.0,
+        always_on_top: false,
+        resizable: true,
+    },
+    PanelSpec {
+        name: SCHEDULES,
+        label: "panel-schedules",
+        title: "Polaris Schedules",
+        route: "#/schedules",
+        width: 460.0,
+        height: 640.0,
+        always_on_top: false,
+        resizable: true,
+    },
+    PanelSpec {
+        name: SUGGESTIONS,
+        label: "panel-suggestions",
+        title: "Polaris Suggestions",
+        route: "#/suggestions",
+        width: 460.0,
+        height: 640.0,
+        always_on_top: false,
+        resizable: true,
+    },
+    PanelSpec {
+        name: ANCHOR,
+        label: "panel-anchor",
+        title: "Polaris Anchor",
+        route: "#/anchor",
+        width: 460.0,
+        height: 640.0,
+        always_on_top: false,
+        resizable: true,
+    },
+    PanelSpec {
+        name: P2P,
+        label: "panel-p2p",
+        title: "Polaris P2P",
+        route: "#/p2p",
+        width: 460.0,
+        height: 640.0,
+        always_on_top: false,
+        resizable: true,
     },
     PanelSpec {
         name: SETTINGS,
@@ -225,8 +280,8 @@ fn window_error(error: tauri::Error) -> PanelError {
     }
 }
 
-/// Opens a named panel (`wallet`, `approval`, `settings`, `debug`). The frontend
-/// calls this through `app/src/lib/panels.ts`; unknown names come back as
+/// Opens a panel by name (any name in [`PANELS`]). The frontend calls this
+/// through `app/src/lib/panels.ts`; unknown names come back as
 /// [`PanelError::UnknownPanel`].
 #[tauri::command]
 pub fn open_panel(app: AppHandle, name: String) -> Result<(), PanelError> {
@@ -238,17 +293,35 @@ mod tests {
     use super::*;
 
     /// The frontend `parsePanelRoute` and the tray both rely on exactly these
-    /// four names; a rename here is a breaking change to both.
+    /// names; a rename here is a breaking change to both.
     #[test]
-    fn the_allow_list_is_exactly_the_four_known_panels() {
+    fn the_allow_list_is_exactly_the_known_panels() {
         let names: Vec<&str> = PANELS.iter().map(|panel| panel.name).collect();
-        assert_eq!(names, vec![WALLET, APPROVAL, SETTINGS, DEBUG]);
+        assert_eq!(
+            names,
+            vec![
+                WALLET,
+                APPROVAL,
+                SECURITY,
+                SCHEDULES,
+                SUGGESTIONS,
+                ANCHOR,
+                P2P,
+                SETTINGS,
+                DEBUG,
+            ]
+        );
     }
 
     #[test]
     fn resolve_finds_known_panels() {
         assert_eq!(resolve(WALLET).unwrap().name, WALLET);
         assert_eq!(resolve(APPROVAL).unwrap().name, APPROVAL);
+        assert_eq!(resolve(SECURITY).unwrap().name, SECURITY);
+        assert_eq!(resolve(SCHEDULES).unwrap().name, SCHEDULES);
+        assert_eq!(resolve(SUGGESTIONS).unwrap().name, SUGGESTIONS);
+        assert_eq!(resolve(ANCHOR).unwrap().name, ANCHOR);
+        assert_eq!(resolve(P2P).unwrap().name, P2P);
         assert_eq!(resolve(SETTINGS).unwrap().name, SETTINGS);
         assert_eq!(resolve(DEBUG).unwrap().name, DEBUG);
     }
@@ -310,6 +383,14 @@ mod tests {
     fn panel_url_carries_the_route_in_the_hash() {
         assert_eq!(panel_url(resolve(WALLET).unwrap()), "index.html#/wallet");
         assert_eq!(panel_url(resolve(APPROVAL).unwrap()), "index.html#/approval");
+        assert_eq!(panel_url(resolve(SECURITY).unwrap()), "index.html#/security");
+        assert_eq!(panel_url(resolve(SCHEDULES).unwrap()), "index.html#/schedules");
+        assert_eq!(
+            panel_url(resolve(SUGGESTIONS).unwrap()),
+            "index.html#/suggestions"
+        );
+        assert_eq!(panel_url(resolve(ANCHOR).unwrap()), "index.html#/anchor");
+        assert_eq!(panel_url(resolve(P2P).unwrap()), "index.html#/p2p");
         assert_eq!(panel_url(resolve(SETTINGS).unwrap()), "index.html#/settings");
         assert_eq!(panel_url(resolve(DEBUG).unwrap()), "index.html#/debug");
     }
@@ -319,6 +400,11 @@ mod tests {
     fn only_the_approval_panel_is_always_on_top() {
         assert!(resolve(APPROVAL).unwrap().always_on_top);
         assert!(!resolve(WALLET).unwrap().always_on_top);
+        assert!(!resolve(SECURITY).unwrap().always_on_top);
+        assert!(!resolve(SCHEDULES).unwrap().always_on_top);
+        assert!(!resolve(SUGGESTIONS).unwrap().always_on_top);
+        assert!(!resolve(ANCHOR).unwrap().always_on_top);
+        assert!(!resolve(P2P).unwrap().always_on_top);
         assert!(!resolve(SETTINGS).unwrap().always_on_top);
         assert!(!resolve(DEBUG).unwrap().always_on_top);
     }
