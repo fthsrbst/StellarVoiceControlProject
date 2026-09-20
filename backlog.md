@@ -24,6 +24,7 @@
 | 2026-09-20 | **W4b-2 — wiring (TS)**: Touch ID approver, `bridge_sign`→`submitSignedTx`→`tx_submitted` path, enriched outcome + tr/en spoken result, Rust `tx_submitted_emit` command + validation, W4 Debug checks (`network`/`approval`/`bridge`/`submit`); needs W4b-1 Rust merged + a human to observe live | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/w4b-wiring.md` | P0 |
 | 2026-09-20 | **W4b-1 — Rust bridge server + independent signature verification**: one-shot loopback `tiny_http` session (one-time token, TTL, const-time compare, Host/Origin/CSP caps), `bridge_sign`/`bridge_selftest`/`bridge_health`, parse-free XDR verification + in-repo StrKey, browser launcher; real browser + Freighter round trip still needs a human | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/w4b-bridge-server.md` | P0 |
 | 2026-09-20 | **W0d — shared panel tx pipeline**: `app/src/lib/txPipeline.ts` (`runTx`/`runTxSequence`, injectable deps, never throws) + `useTxRun.ts` hook, reuse the Touch ID approver/`signAndSubmit`; fake-based tests; docs §10 | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/w0d-tx-pipeline.md` | P1 |
+| 2026-09-20 | **W9 — SPP in-app (read-only)**: SDK signer is pluggable but needs Freighter `signAuthEntry`, so shipped a read-only `privacy` panel (RPC status, contracts, verified spike evidence, explainer) + `lib/spp.ts` + Debug check; value-moving forms disabled; handoff in report | opencode-go/deepseek-v4.1-flash | open (review) | `backlog/w9-spp.md` | P2 |
 
 ## Completed Tasks (Archive)
 
