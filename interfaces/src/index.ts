@@ -243,3 +243,102 @@ export interface StellarConfig {
   aliases: Record<string, string>;
   guardContractId: string | null;
 }
+
+/* ------------------------------------------------------------------ *
+ * 8. Approval gate (step W3)
+ *
+ * Section 7 is reserved for the chain-configuration types (W1), which append
+ * after `AppInfo` too; this section is numbered 8 so the two branches do not
+ * collide on merge.
+ * ------------------------------------------------------------------ */
+
+/** How an approval is expected to be granted. */
+export type ApprovalMode = "touch_id" | "wallet_only";
+
+/** The lifecycle of one approval request; `consumed` is terminal and one-way. */
+export type ApprovalState = "pending" | "authorized" | "denied" | "expired" | "consumed";
+
+/**
+ * The input to `approval_begin`. `payloadHash` must be the lowercase hex SHA-256
+ * of the UTF-8 bytes of `unsignedXdr`; the gate rejects a mismatch.
+ */
+export interface ApprovalRequestInput {
+  /** Assigned by the gate; the webview may omit it. */
+  id?: string;
+  payloadHash: string;
+  /** base64 XDR, unsigned */
+  unsignedXdr: string;
+  summary: ChainToolResult["summary"];
+  intent: Intent;
+  /** Defaults to `"touch_id"`. */
+  mode?: ApprovalMode;
+  /**
+   * Reserved for the anchor flow (W5). It is **not** an authorization signal:
+   * `approval_begin` rejects `"wallet_only"` unconditionally, and only an
+   * in-process Rust API can create such a request.
+   */
+  origin?: string;
+}
+
+/**
+ * What `approval_current` returns so a panel that opened *after* the
+ * `approval_request` event can hydrate. It deliberately never carries the
+ * unsigned XDR.
+ */
+export interface ApprovalSnapshot {
+  id: string;
+  payloadHash: string;
+  summary: ChainToolResult["summary"];
+  intent: Intent;
+  mode: ApprovalMode;
+  state: ApprovalState;
+  expiresAtMs: number;
+}
+
+/** What `approval_status` returns, including why a request was denied. */
+export interface ApprovalStatus {
+  id: string;
+  state: ApprovalState;
+  reason?: string;
+}
+
+/**
+ * The failure categories every approval command rejects with. The approval card
+ * branches on `kind`; `message` is human-readable detail. The Rust mirror is
+ * `ApprovalErrorKind` in `app/src-tauri/src/approval.rs`.
+ */
+export type ApprovalErrorKind =
+  | "cancelled"
+  | "failed"
+  | "unavailable"
+  | "timeout"
+  | "expired"
+  | "notPending";
+
+/**
+ * The typed rejection shape of the approval commands. `approval_authorize` and
+ * `approval_deny` otherwise resolve to the updated `ApprovalSnapshot`; the
+ * command contract is declared in `docs/interfaces.md` §8.
+ */
+export interface ApprovalCommandError {
+  kind: ApprovalErrorKind;
+  message: string;
+}
+
+/* ------------------------------------------------------------------ *
+ * 9. Feature health (Debug panel contract)
+ * ------------------------------------------------------------------ */
+
+export type HealthStatus = "ok" | "warn" | "fail" | "unknown";
+
+/** One feature's health, rendered directly by the in-app Debug panel. */
+export interface FeatureHealth {
+  id: string;
+  title: string;
+  milestone: string;
+  status: HealthStatus;
+  /** One actionable sentence; never contains secrets. */
+  detail: string;
+  /** Milliseconds since the Unix epoch. */
+  checkedAt: number;
+}
