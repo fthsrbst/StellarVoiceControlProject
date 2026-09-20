@@ -19,7 +19,7 @@ disable auto-pay plus edit the alias book — always through the shared approval
   `buildBaselineSetup`, `buildTightenRule`, `buildDisableAutoPay`, `setAlias`); native XLM SAC id
   derived from the native asset + passphrase (`Asset.native().contractId(...)` —
   `CDLZFC3S…GCYSC`, verified in-node). Config (owner/guard/rpc/passphrase) from `stellar_config`.
-- `app/src/lib/guardState.test.ts` — 12 pure tests.
+- `app/src/lib/guardState.test.ts` — 11 pure tests.
 - `app/src/panels/SecurityPanel.tsx` (body only) + `app/src/panels/security/{ProfileForm,AliasEditor}.tsx`.
 - `app/src/debug/checks/security.ts` — W6 check (guard id configured + reachable, rule readable,
   executor state; `warn` when not set up).
@@ -38,7 +38,7 @@ disable auto-pay plus edit the alias book — always through the shared approval
 
 ## Test output (real)
 - `npm run check -w @polaris/app` — pass (no output).
-- `npm test -w @polaris/app` — **184 tests, 184 pass, 0 fail** (12 new in `guardState.test.ts`).
+- `npm test -w @polaris/app` — **184 tests, 184 pass, 0 fail** (11 new in `guardState.test.ts`).
 - `npm run build -w @polaris/app` — built OK; only the pre-existing `INEFFECTIVE_DYNAMIC_IMPORT`
   warnings (`approver.ts`, `signing.ts`, `aliases.json` static+dynamic import), unchanged by this task.
 - Rust untouched — no cargo run was needed.
@@ -56,3 +56,10 @@ disable auto-pay plus edit the alias book — always through the shared approval
   agent's public `G…` key into the panel's "Executor" field before enabling auto-pay (a hidden line in
   `runEnable` notes this). Reading a configured executor (e.g. `POLARIS_EXECUTOR_ADDRESS`) needs a Rust
   change outside this task's scope — handoff to W1/W3 if desired.
+
+## Review fixes (2026-09-20, W6a-fix)
+- **B1 (blocker):** `runTxSequence` resequences every step's unsigned XDR against its source's current on-chain sequence right before approval, recomputes the digest from the resequenced XDR and refreshes the summary's explorer link; reuses `resequenceEnvelope`/`setSequence` (now exported from `@polaris/stellar`). Optional lazy `build()` is preferred when present. `txPipeline.test.ts` +3 (submits 101/102/103, failure stops the rest, build preferred).
+- **M2:** the radio drives the plan — "Always ask" forces threshold 0 and builds the baseline; only "Auto under limit" arms the typed threshold (`effectiveFields`/`actionForMode`, tested). Supersedes the old "mode only narrows" claim.
+- **M3:** alias list is the union of loaded + just-saved names; a read error renders "read failed", distinct from "not on chain".
+- **N4–N8:** note says one card + Touch ID per step; `readBackTighten` names the real auto-approve limit; `stepIntent` stores each step's real amount; baseline honours "Saved contacts only"; in-flight double-click guard; dead `effective`/duplicate `format` removed; test count corrected to 11.
+- Counts after fixes: app **190 pass / 0 fail**; stellar suites green (keeper 67, live 112, others 197/122/133/112/121/145); `npm run check` + app build green. Live testnet + Touch ID/Freighter still needs a human.

@@ -204,7 +204,9 @@
 - [x] (2026-09-20, chain-lane PR) **T3.** Suggestions engine: pure `suggest()` + fixtures + tests — `stellar/src/suggest/` (PLANNED), offline
 - [ ] **T4.** History readers: local encrypted history store + Horizon/`Paid` events reader
 - [ ] **T5.** UI (Owner A): Settings "Security" profiles, "Upcoming payments" list with Cancel, suggestions panel with Accept/Dismiss, auto-pay enable card
-- [x] (2026-09-20, W6a panel) Security panel: on-chain state + profiles + enable/tighten/disable in D13 order + alias editor + W6 Debug check — `backlog/w6a-security-panel.md` (upcoming-payments/suggestions remain)- [ ] **T6.** Demo runbook completed after T1/T2/T5 (`docs/demo-runbook.md`)
+- [x] (2026-09-20, W6a panel) Security panel: on-chain state + profiles + enable/tighten/disable in D13 order + alias editor + W6 Debug check — `backlog/w6a-security-panel.md` (upcoming-payments/suggestions remain)
+- [x] (2026-09-20, W6a-fix) Review fixes: per-step resequencing in `runTxSequence` (B1), mode-driven plan (M2), alias union + read-failed (M3), honest wording + double-click guard (N4–N8) — `backlog/w6a-security-panel.md`
+- [ ] **T6.** Demo runbook completed after T1/T2/T5 (`docs/demo-runbook.md`)
 
 ## Milestone 4 — Delivery / Presentation 🔲
 > Deadline: 20 Sep 12:00. Bonuses (passkey wallet, P2P escrow, developer mode) ONLY after M4 items are done.
