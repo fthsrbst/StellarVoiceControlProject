@@ -8,7 +8,18 @@ import { executeApprovedIntent } from "@/lib/chain";
 import { speakSentence, speakTurnResult } from "@/lib/speech";
 import { failureSentence, submittedSentence } from "@polaris/agent";
 import { TurnFlow } from "@/lib/turnFlow";
-import { isCurrentTurn, reduceTurnSession, stageWatchdog, type TurnSession } from "@/lib/turnSession";
+import {
+  isActiveStage,
+  isCurrentTurn,
+  isPaymentStage,
+  noticeLabel,
+  reduceTurnSession,
+  stageLabel,
+  stageWatchdog,
+  TOTAL_WATCHDOG_MS,
+  type PaymentStage,
+  type TurnSession,
+} from "@/lib/turnSession";
 import {
   getCaptureStatus,
   getHotkeyPermission,
@@ -66,9 +77,12 @@ const PERMISSION_HINT_MS = 8000;
  * and one explicit **turn session** (`reduceTurnSession`). A turn begins when
  * the hotkey goes down and ends once — after the answer has been spoken, or
  * after a failure label has had its dwell. In between the shell stays expanded,
- * moving `listening -> thinking -> checking -> speaking` with no intermediate
- * collapse; that continuity is the whole point of modelling the turn as one
- * session instead of several independent visuals that happened to overlap.
+ * moving `listening -> thinking -> speaking` (and, for a payment, through
+ * `awaiting_approval -> signing -> submitting` before the confirmation speech)
+ * with no intermediate collapse; that continuity is the whole point of modelling
+ * the turn as one session instead of several independent visuals that happened
+ * to overlap. F1 makes the payment stages visible and gives each its own
+ * watchdog, so the notch cannot close while value is still moving.
  */
 export default function App() {
   const [status, setStatus] = useState<CaptureStatus>(IDLE_STATUS);
@@ -87,14 +101,28 @@ export default function App() {
   const sessionRef = useRef<TurnSession | null>(session);
   sessionRef.current = session;
 
-  // A failed turn stays up for its dwell, then a single `settled` ends it. The
-  // effect is keyed on the session id so a new failure re-arms while a re-render
-  // of the same failure does not (so it settles exactly once).
+  // A terminal turn stays up for its dwell, then a single `settled` ends it: the
+  // failure label gets `FAILURE_DWELL_MS`, a healthy `done` collapses at once
+  // (the answer has already been spoken). Keyed on the session id so a new
+  // terminal stage re-arms while a re-render of the same one does not — it
+  // settles exactly once.
   useEffect(() => {
-    if (session?.stage !== "failed") return;
-    const timer = setTimeout(() => dispatchTurn({ type: "settled" }), FAILURE_DWELL_MS);
+    if (session?.stage !== "error" && session?.stage !== "done") return;
+    const dwell = session.stage === "error" ? FAILURE_DWELL_MS : 0;
+    const timer = setTimeout(() => dispatchTurn({ type: "settled" }), dwell);
     return () => clearTimeout(timer);
   }, [session?.id, session?.stage]);
+
+  // F1: one ceiling for the whole turn, so a payment path that shuffles between
+  // (individually bounded) stages cannot hold the notch open indefinitely.
+  useEffect(() => {
+    if (session === null || !isActiveStage(session.stage)) return;
+    const timer = setTimeout(
+      () => dispatchTurn({ type: "failed", label: "Timed out" }),
+      TOTAL_WATCHDOG_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [session?.id]);
 
   // Stuck-stage watchdog (M4): both bounded stages are watched — the pre-speech
   // wait AND `speaking`, so a wedged player cannot hold the shell open forever.
@@ -139,10 +167,21 @@ export default function App() {
     };
 
     const runFromTranscript = (raw: string, language?: string): void => {
+      // F1: while a payment is awaiting approval, signing or submitting, a take
+      // that slipped through the (refused) hotkey must not start a superseding
+      // agent turn. The pending payment takes priority until it settles.
+      const pending = sessionRef.current?.stage;
+      if (pending !== undefined && isPaymentStage(pending)) {
+        console.warn("ignoring a transcript while a payment is pending");
+        return;
+      }
       const admission = flowRef.current.offer(raw);
       if (admission.kind === "ignore") return;
       const { ticket } = admission;
       const current = (): boolean => flowRef.current.isCurrent(ticket);
+      // The STT-detected language labels the notch stages until the agent reports
+      // the reconciled language below.
+      dispatchTurn({ type: "language", language: language ?? null });
       // The agent core emits `agent_status: thinking` at the exact moment it
       // takes the transcript; that event — not this call — enters the thinking
       // stage. Nothing here may jump ahead to "speaking": that is raised only by
@@ -168,6 +207,9 @@ export default function App() {
             dispatchTurn({ type: "failed", label: run.failure.label });
             return;
           }
+          // The model's reconciled language is the authoritative one for the
+          // reply/voice (A14), so it also drives the notch labels from here on.
+          dispatchTurn({ type: "language", language: run.outcome.language ?? null });
           if (!run.outcome.intent) {
             // A conversational turn has nothing to execute: speak the answer and
             // let the real `speech_status` stream end the turn.
@@ -188,7 +230,14 @@ export default function App() {
           // Capture the narrowed intent: TypeScript does not carry the `if`
           // narrowing into the async closure below.
           const intent = run.outcome.intent;
-          void executeApprovedIntent(intent)
+          // F1: the approval gate and the sign/submit path report their real
+          // boundaries here, so the notch wears the matching stage for the whole
+          // (human-paced) wait instead of the generic "Thinking".
+          const onStage = (stage: PaymentStage): void => {
+            if (disposed || !isCurrentTurn(sessionRef.current, turnId)) return;
+            dispatchTurn({ type: "stage", stage });
+          };
+          void executeApprovedIntent(intent, { onStage })
             .then((outcome) => {
               if (disposed || !isCurrentTurn(sessionRef.current, turnId)) return;
               if (outcome.status === "executed" && outcome.txHash) {
@@ -317,55 +366,56 @@ export default function App() {
 
   // The CSS treatment reuses the existing `state-*` language: capture's
   // `recording`/`transcribing` names stay the selectors for the listening and
-  // thinking stages, and a failed session borrows the error treatment. (A9
-  // removed the `checking` stage: the intent-validation step is synchronous and
-  // unreadable, so no label is flashed for it.)
-  const shellState = connectionError || session?.stage === "failed"
+  // working stages, and an errored session borrows the error treatment. The F1
+  // payment stages borrow `transcribing` on purpose: they are all "Polaris is
+  // working" and the label carries the meaning, so no new CSS state is needed.
+  const shellState = connectionError || session?.stage === "error"
     ? "error"
     : session?.stage === "listening"
       ? "recording"
-      : session?.stage === "thinking"
-        ? "transcribing"
-        : session?.stage === "speaking"
-          ? "speaking"
+      : session?.stage === "speaking"
+        ? "speaking"
+        : session !== null
+          ? "transcribing"
           : "idle";
 
-  // The shell is expanded for the whole of a live turn, and only a live turn
-  // (plus a connection in progress or the one-time permission hint) expands it.
-  const expanded = shellState !== "idle" || !connected || showPermissionHint;
+  // The shell is expanded for the whole of a live turn — including its terminal
+  // stage, until the dwell collapses it — plus a connection in progress or the
+  // one-time permission hint. Deriving this from `session !== null` (not from
+  // the CSS state) is what keeps `done` from collapsing a frame early.
+  const expanded = session !== null || connectionError !== null || !connected || showPermissionHint;
 
   // The label is the ONLY thing drawn in the left ear, so it has to stay short:
   // the ear is deliberately narrow and anything longer would be clipped (it can
   // never spill right, because that is the camera housing). The full wording
-  // still reaches assistive tech through the live region below.
+  // still reaches assistive tech through the live region below. Labels follow the
+  // turn's language; an `error` keeps the outcome's own short label.
   const label = connectionError
     ? "Reconnecting"
-    : session?.stage === "failed"
-      ? (session.failureLabel ?? "Error")
-      : session?.stage === "listening"
-        ? "Listening"
-        : session?.stage === "thinking"
-          ? "Thinking"
-          : session?.stage === "speaking"
-            ? "Speaking"
-            : showPermissionHint
-              ? "Grant access"
-              : connected
-                ? "Ready"
-                : "Connecting";
+    : session === null
+      ? showPermissionHint
+        ? "Grant access"
+        : connected
+          ? "Ready"
+          : "Connecting"
+      : session.notice !== null
+        ? noticeLabel(session.notice, session.language)
+        : session.stage === "error"
+          ? (session.failureLabel ?? stageLabel("error", session.language))
+          : stageLabel(session.stage, session.language);
   const detail = connectionError
     ? "Reconnecting…"
-    : session?.stage === "failed"
+    : session?.stage === "error"
       ? "⌃⌥ to retry"
       : session?.stage === "listening"
         ? "Release to finish"
-        : session?.stage === "thinking"
-          ? "Working…"
-          : session?.stage === "speaking"
-            ? "Polaris is talking"
+        : session?.stage === "speaking"
+          ? "Polaris is talking"
+          : session !== null
+            ? "Working…"
             : showPermissionHint
-                ? "System Settings › Privacy & Security › Accessibility"
-                : "Starting up…";
+              ? "System Settings › Privacy & Security › Accessibility"
+              : "Starting up…";
   const error = connectionError ?? status.error;
 
   const style = {

@@ -26,6 +26,7 @@
 | 2026-09-20 | **W0d — shared panel tx pipeline**: `app/src/lib/txPipeline.ts` (`runTx`/`runTxSequence`, injectable deps, never throws) + `useTxRun.ts` hook, reuse the Touch ID approver/`signAndSubmit`; fake-based tests; docs §10 | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/w0d-tx-pipeline.md` | P1 |
 | 2026-09-20 | **F2 — assistant system prompt**: `capabilities.ts` (role + registry-generated capability list + config account table + few-shots), `accountRefs.ts` normalisation, app config wiring, live `e2e:prompt` eval 31/31=100% | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/f2-assistant-prompt.md` | P0 |
 | 2026-09-20 | **F3 — STT reliability**: bilingual Groq `prompt` (aliases from `POLARIS_ALIASES`), one-shot allowed-language retry (`POLARIS_STT_ALLOWED_LANGS`), short-audio hallucination filter, `GroqTransport` seam + `npm run stt:probe` live table; real-mic run still needs a human | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/f3-stt-vocab.md` | P0 |
+| 2026-09-20 | **F1 — notch lifetime**: payment stages (`awaiting_approval`/`signing`/`submitting`) via additive `onStage`, collapse only from `done`/`error`, pending payment owns the notch (hotkey refused with a soft label), per-stage + 6 min total watchdogs, en/tr labels; 185 app tests pass | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/f1-notch-lifetime.md` | P0 |
 
 ## Completed Tasks (Archive)
 
