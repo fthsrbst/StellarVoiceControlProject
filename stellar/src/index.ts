@@ -42,7 +42,17 @@ function todo(tool: string): ChainTool {
  */
 // Real payment builder (Intent -> unsigned XDR + decoded summary). Configure it once
 // with `configurePayments(deps)`; calling it before that throws a typed refusal.
+// The shell's composition root (`app/src/lib/chain.ts`) needs the config and
+// alias-book helpers too, so they are re-exported here.
 export { sendPayment } from "./payments/index.ts";
+export {
+  configurePayments,
+  defaultPaymentDeps,
+  parseAliasBook,
+  PaymentRefusal,
+  type AliasBook,
+  type PaymentDeps,
+} from "./payments/index.ts";
 export const swap = todo("swap");
 export const guardPolicy = todo("guardPolicy");
 

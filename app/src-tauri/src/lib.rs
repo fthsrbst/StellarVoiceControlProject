@@ -15,6 +15,7 @@ mod gesture;
 mod hotkey;
 mod hotkey_flags;
 mod notch;
+mod stellar_config;
 mod stt;
 mod timing;
 mod tts;
@@ -47,6 +48,7 @@ pub fn run() {
             notch::notch_geometry,
             notch::notch_window_flags,
             hotkey::hotkey_permission,
+            stellar_config::stellar_config,
         ])
         .setup(|app| {
             // Captures live under the app data dir so they never land in the repo.

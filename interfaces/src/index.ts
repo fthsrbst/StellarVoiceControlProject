@@ -199,3 +199,28 @@ export interface AppInfo {
   network: string;
   tauriVersion: string;
 }
+
+/* ------------------------------------------------------------------ *
+ * 7. Chain configuration (Tauri `stellar_config` command)
+ * ------------------------------------------------------------------ */
+
+/**
+ * The non-secret chain configuration the shell reads once from Rust and hands to
+ * the chain tool (`app/src/lib/chain.ts`). Rust mirrors this type byte-for-byte
+ * in `app/src-tauri/src/stellar_config.rs`; it is an allow-list — no secret
+ * (provider key, keeper secret) is ever part of it.
+ *
+ * `ownerAddress` is the sender (a public `G...` address); `null` means the shell
+ * must refuse with "Set POLARIS_OWNER_ADDRESS" rather than guess. `aliases` is
+ * the env-supplied book (`POLARIS_ALIASES`), merged over the committed
+ * `aliases.json` on the TypeScript side.
+ */
+export interface StellarConfig {
+  network: string;
+  rpcUrl: string;
+  horizonUrl: string;
+  networkPassphrase: string;
+  ownerAddress: string | null;
+  aliases: Record<string, string>;
+  guardContractId: string | null;
+}
