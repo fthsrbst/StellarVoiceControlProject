@@ -470,6 +470,7 @@ mod tests {
             owner_address: Some(OWNER.to_string()),
             aliases: Default::default(),
             guard_contract_id: None,
+            p2p_contract_id: None,
         }
     }
 
@@ -766,16 +767,6 @@ mod tests {
             signer_hint: Some(vec![0xAA; 4]),
         };
         let config = test_config();
-        let config = stellar_config::StellarConfig {
-            network: "testnet".to_string(),
-            rpc_url: "https://rpc".to_string(),
-            horizon_url: "https://horizon".to_string(),
-            network_passphrase: PASSPHRASE.to_string(),
-            owner_address: Some(OWNER.to_string()),
-            aliases: Default::default(),
-            guard_contract_id: None,
-            p2p_contract_id: None,
-        };
         let outcome = RunContext::from_authorized(
             released,
             &config,

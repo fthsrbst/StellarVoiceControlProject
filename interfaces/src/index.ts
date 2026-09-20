@@ -21,13 +21,9 @@ export type IntentKind =
   | "swap"
   | "send"
   | "guard_policy"
-  | "raw_tx";
-  | "swap"
-  | "send"
-  | "guard_policy"
   | "raw_tx"
   | "schedule_payment"
-  | "cancel_schedule";
+  | "cancel_schedule"
   // P2P escrow (W8): lock tokens and ask TRY off-chain, take an offer, confirm
   // the off-chain TRY payment. Value-moving, so every one is approval-gated.
   | "p2p_offer"
@@ -65,6 +61,7 @@ export interface Intent {
   scheduleId?: number;
   /** `cancel_schedule` only. How to pick among several schedules for one recipient. */
   which?: "last" | "next";
+  /**
    * P2P offer only: the asking price in TRY as a decimal string (e.g. "3400").
    * The off-chain TRY leg is never moved by Polaris; this is only the price the
    * seller asks for and the rate the offer shows.

@@ -214,9 +214,10 @@
 - [x] (2026-09-20, chain-lane PR) **T3.** Suggestions engine: pure `suggest()` + fixtures + tests — `stellar/src/suggest/` (PLANNED), offline
 - [ ] **T4.** History readers: local encrypted history store + Horizon/`Paid` events reader
 - [ ] **T5.** UI (Owner A): Settings "Security" profiles, "Upcoming payments" list with Cancel, suggestions panel with Accept/Dismiss, auto-pay enable card
-- [x] (2026-09-20, W6a panel) Security panel: on-chain state + profiles + enable/tighten/disable in D13 order + alias editor + W6 Debug check — `backlog/w6a-security-panel.md` (upcoming-payments/suggestions remain)- [ ] **T6.** Demo runbook completed after T1/T2/T5 (`docs/demo-runbook.md`)
+- [x] (2026-09-20, W6a panel) Security panel: on-chain state + profiles + enable/tighten/disable in D13 order + alias editor + W6 Debug check — `backlog/w6a-security-panel.md` (upcoming-payments/suggestions remain)
 - [x] (2026-09-20, branch `feat/w6b-schedules`) **W6b.** Scheduled payments: voice intents `schedule_payment`/`cancel_schedule` (tr/en, explicit device zone) + "Upcoming payments" panel (Cancel / New schedule / keeper strip) + `schedules` Debug check — see `backlog/w6b-schedules.md`
 - [ ] **T6.** Demo runbook completed after T1/T2/T5 (`docs/demo-runbook.md`)
+- [x] (2026-09-20, `integration/wallet`) **Merge-fix.** Repaired the naive five-branch merge (interfaces/agent/app/Rust); all checks, tests, build and clippy green — `backlog/merge-fix-integration.md`
 
 ## Milestone 4 — Delivery / Presentation 🔲
 > Deadline: 20 Sep 12:00. Bonuses (passkey wallet, P2P escrow, developer mode) ONLY after M4 items are done.

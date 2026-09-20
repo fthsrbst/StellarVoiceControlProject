@@ -16,6 +16,7 @@ export interface ToolContext {
    * returned as "wallet 2" or "hesap 2" by resolving it to `acc2`.
    */
   aliases?: Record<string, string>;
+  /**
    * The device's IANA zone, used to interpret schedule wall-clock times when the
    * user named no zone (W6b). Optional so workers that do not need it can omit
    * it; schedule tools fall back to `Intl`'s resolved zone.

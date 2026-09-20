@@ -23,25 +23,22 @@ import { p2pAcceptTool, p2pConfirmTool, p2pOfferTool } from "./tools/p2p.ts";
 import { createToolRegistry, type ToolRegistry } from "./tools/registry.ts";
 
 /**
- * The production tool set: the real intent tools and nothing else.
  * The production tool set: the value-moving intent tools and nothing else.
  *
  * Step A5 trimmed the `noop` round-trip probe out of the default registry. Every
  * registered tool is serialised into **every** model request, and `noop` was a
  * demo artifact — it only added tokens (and reasoning) to real turns. It is still
  * exported and used by `demo.ts` and the loop tests. W5b adds `deposit` and
- * `withdraw` for the anchor on/off-ramp; they validate into an `Intent` exactly
- * like `send_payment` and never touch the chain here.
- * exported and used by `demo.ts` and the loop tests. W6b adds the two schedule
- * tools; all three stop at a validated `Intent` (never executed in the turn).
+ * `withdraw` for the anchor on/off-ramp, W6b the two schedule tools and W8b the
+ * P2P escrow tools; they all validate into an `Intent` and never touch the chain.
  */
 export function createDefaultRegistry(): ToolRegistry {
   return createToolRegistry()
     .register(sendPaymentTool)
     .register(depositTool)
-    .register(withdrawTool);
+    .register(withdrawTool)
     .register(schedulePaymentTool)
-    .register(cancelScheduleTool);
+    .register(cancelScheduleTool)
     .register(p2pOfferTool)
     .register(p2pAcceptTool)
     .register(p2pConfirmTool);
