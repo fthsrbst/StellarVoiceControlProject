@@ -220,6 +220,8 @@
 - [ ] **T5.** UI (Owner A): Settings "Security" profiles, "Upcoming payments" list with Cancel, suggestions panel with Accept/Dismiss, auto-pay enable card
 - [x] (2026-09-20, W6a panel) Security panel: on-chain state + profiles + enable/tighten/disable in D13 order + alias editor + W6 Debug check — `backlog/w6a-security-panel.md` (upcoming-payments/suggestions remain)
 - [x] (2026-09-20, branch `feat/w6b-schedules`) **W6b.** Scheduled payments: voice intents `schedule_payment`/`cancel_schedule` (tr/en, explicit device zone) + "Upcoming payments" panel (Cancel / New schedule / keeper strip) + `schedules` Debug check — see `backlog/w6b-schedules.md`
+- [x] (2026-09-20, branch `feat/nw3-tasks-page`) **NW3.** Notch Tasks page → real schedules: `notch/data/useTasksData.ts` (view-model mappers + thin hook; mock only outside Tauri/no owner) + `TasksPage.tsx` (local+UTC next run, amount/alias, recurrence, runs left, keeper hint, Cancel via `txPipeline`, Retry/empty states); 6 mapper tests, app 299/build green — `backlog/nw3-tasks-page.md`
+
 - [ ] **T6.** Demo runbook completed after T1/T2/T5 (`docs/demo-runbook.md`)
 - [x] (2026-09-20, `integration/wallet`) **Merge-fix.** Repaired the naive five-branch merge (interfaces/agent/app/Rust); all checks, tests, build and clippy green — `backlog/merge-fix-integration.md`
 - [x] (2026-09-20, `integration/wallet`) **MERGE-FIX2.** Fixed the W5a-broken Rust test build (`challenge` field in two test initializers) and re-scanned the last three merges for keep-both damage (none found); cargo test/clippy, `npm run check`, app/agent tests green — `backlog/merge-fix-integration.md`
