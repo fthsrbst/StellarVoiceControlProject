@@ -22,6 +22,7 @@ import {
   isPaymentStage,
   noticeLabel,
   reduceTurnSession,
+  shellVoiceInputs,
   shouldSurfaceOutcome,
   stageLabel,
   stageWatchdog,
@@ -399,20 +400,18 @@ export default function App() {
 
   // The shell is expanded for the whole of a live turn — including its terminal
   // stage, until the dwell collapses it — plus a connection in progress or the
-  // one-time permission hint. Deriving this from `session !== null` (not from
-  // the visual) is what keeps `done`/`error` from collapsing a frame early.
-  const expanded = session !== null || connectionError !== null || !connected || showPermissionHint;
-
-  // The voice source only outranks hover while it is an attention state the user
-  // must see (listening/thinking/speaking, a pending payment, a permission hint,
-  // a connection error). During a terminal dwell it only keeps the label up, so
-  // hover can still open the panel instead of being locked out for the whole
-  // dwell (MINOR-1). `isActiveStage` is exactly that attention set.
-  const voiceAttention =
-    connectionError !== null ||
-    !connected ||
-    showPermissionHint ||
-    (session !== null && isActiveStage(session.stage));
+  // one-time permission hint. The voice source only outranks hover while it is
+  // an attention state the user must see (listening/thinking/speaking, a pending
+  // payment, a permission hint, a connection error). During a terminal dwell it
+  // only keeps the label up, so hover can still open the panel instead of being
+  // locked out for the whole dwell (MINOR-1). Both inputs come from the pure
+  // `shellVoiceInputs` so the precedence is unit-tested (`turnSession.test.ts`).
+  const { state: voiceState, attention: voiceAttention } = shellVoiceInputs(session, {
+    connectionError: connectionError !== null,
+    connected,
+    permissionHint: showPermissionHint,
+  });
+  const expanded = voiceState === "compact";
 
   // The label is the ONLY thing drawn in the left ear, so it has to stay short:
   // the ear is deliberately narrow and anything longer would be clipped (it can
@@ -452,7 +451,7 @@ export default function App() {
       <ShellSurface
         geometry={geometry}
         visual={visual}
-        voiceState={expanded ? "compact" : "collapsed"}
+        voiceState={voiceState}
         voiceAttention={voiceAttention}
         label={label}
         detail={detail}
