@@ -198,3 +198,46 @@ calm hint.
 `#/approval?demo=expired`, `#/approval?demo=error`. Demo mode swaps in fixture
 commands and shows a mandatory “DEMO — nothing is signed” banner; real mode
 (`#/approval` with no `demo`) never uses a fixture.
+
+## 9. Signing flow (`#/approval` → Freighter → submit)
+
+> Step W4b. How an approved card becomes a signed, submitted transaction, and
+> where the gate sits. Rust owns the gate and the bridge; the webview only
+> orchestrates and announces the result.
+
+The value-moving path is one chain of typed seams, each of which fails closed:
+
+1. **Build.** `executeIntent` (`@polaris/agent`) runs the chain tool, which
+   returns an unsigned XDR + decoded summary, then asks the approver. The
+   approved request now also carries `unsignedXdr` so the gate can bind it to
+   `payloadHash`.
+2. **Approve.** `app/src/lib/approver.ts` (`createTouchIdApprover`) registers
+   the request with `approval_begin`, opens `#/approval`, and waits (≤ 130 s) on
+   the `approval_result` event **and** `approval_status` polling. It resolves
+   `{ approved: true }` only when the gate reports the exact `payloadHash` as
+   `authorized`; denied, expired, timed-out, superseded and errored are all
+   `false`. `chain.ts` selects it when a Tauri runtime is present;
+   `POLARIS_ALLOW_AUTO_APPROVE` stays opt-in and only applies outside Tauri.
+3. **Sign.** `app/src/lib/signing.ts` calls `bridge_sign(id)`. Rust takes the
+   XDR from the gate via `take_authorized(id)` — the only path by which XDR
+   leaves the gate — mints a one-time loopback token, opens the user's browser at
+   the bridge page, and waits for the wallet. Rust independently verifies the
+   returned envelope before reporting `ok`.
+4. **Submit.** `submitSignedTx(signedXdr, unsignedXdr)` submits over Horizon. The
+   returned hash must equal the `txHash` Rust computed; a mismatch is a labelled
+   failure, never a silent success.
+5. **Emit.** The webview cannot emit a typed `polaris-event`, so it calls the one
+   narrow Rust command `tx_submitted_emit(hash, explorerUrl)`, which validates
+   the pair (64 lowercase hex; the canonical testnet link for that hash) and then
+   emits `tx_submitted`. The shell speaks the localized “Sent 10 XLM to acc2”
+   line and links the transaction on stellar.expert.
+
+Every failure maps to a short human label on the `ExecutionOutcome` (e.g.
+“Cancelled”, “Wallet didn't sign”, “Transaction expired”), is spoken briefly,
+and settles the turn — nothing throws and the notch never sticks.
+
+**Debug checks** (`docs/debug-panel.md`): `network.ts` (config, testnet, owner,
+alias, Horizon balance), `approval.ts` (`biometric_health` + a “Test Touch ID”
+action), `bridge.ts` (`bridge_health` + a “Test Freighter signing (no funds)”
+action that builds an owner→owner 1 XLM payment with sequence 0), `submit.ts`
+(static importability only).
