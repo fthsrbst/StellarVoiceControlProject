@@ -2,6 +2,7 @@ import { AnchorPanel } from "@/panels/AnchorPanel";
 import { ApprovalPanel } from "@/panels/ApprovalPanel";
 import { DebugPanel } from "@/panels/DebugPanel";
 import { P2pPanel } from "@/panels/P2pPanel";
+import { PrivacyPanel } from "@/panels/PrivacyPanel";
 import { SchedulesPanel } from "@/panels/SchedulesPanel";
 import { SecurityPanel } from "@/panels/SecurityPanel";
 import { SettingsPanel } from "@/panels/SettingsPanel";
@@ -30,6 +31,8 @@ export function PanelRoot({ panel }: { panel: PanelName }) {
       return <AnchorPanel />;
     case "p2p":
       return <P2pPanel />;
+    case "privacy":
+      return <PrivacyPanel />;
     case "settings":
       return <SettingsPanel />;
     case "debug":

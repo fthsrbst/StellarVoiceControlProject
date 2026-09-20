@@ -201,6 +201,7 @@
 - [ ] CT integration (`stellar/src/confidential/`, PLANNED) — conditional on GO
 - [ ] SPP spike (2h cap) → GO / NO-GO (`backlog/confidential-spike-spp.md`)
 - [ ] SPP integration (`stellar/src/spp/`, PLANNED) — conditional on GO
+- [x] (2026-09-20, branch `feat/w9-spp`) **W9.** In-app SPP read-only: `privacy` panel + `lib/spp.ts` (status/contracts/verified evidence) + Debug check; value-moving forms blocked on a bridge `signAuthEntry` extension — `backlog/w9-spp.md`
 - [ ] `polaris_guard_v2` crate (new contract, own deployment; NOT an edit of `polaris_guard`) — D9
 - [ ] `polaris_privacy_gate` crate (conditional on the spike showing on-chain deposit/withdraw gating is possible) — D9
 - [ ] Approval-card privacy variant + batch payroll card

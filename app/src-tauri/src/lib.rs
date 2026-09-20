@@ -192,6 +192,7 @@ const TRAY_MENU_PANELS: &[&str] = &[
     panels::SUGGESTIONS,
     panels::ANCHOR,
     panels::P2P,
+    panels::PRIVACY,
     panels::SETTINGS,
     panels::DEBUG,
 ];
@@ -219,6 +220,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .text(panels::SUGGESTIONS, "Suggestions…")
         .text(panels::ANCHOR, "Anchor…")
         .text(panels::P2P, "P2P…")
+        .text(panels::PRIVACY, "Privacy…")
         .text(panels::SETTINGS, "Settings…")
         .text(panels::DEBUG, "Debug…")
         .separator()

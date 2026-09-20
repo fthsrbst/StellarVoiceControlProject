@@ -22,6 +22,7 @@ export type PanelName =
   | "suggestions"
   | "anchor"
   | "p2p"
+  | "privacy"
   | "settings"
   | "debug";
 
@@ -33,6 +34,7 @@ export const PANEL_NAMES: readonly PanelName[] = [
   "suggestions",
   "anchor",
   "p2p",
+  "privacy",
   "settings",
   "debug",
 ];
