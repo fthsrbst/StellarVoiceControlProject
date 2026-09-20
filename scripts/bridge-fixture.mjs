@@ -52,11 +52,21 @@ function fail(message) {
   process.exit(2);
 }
 
-function parseAliases(value) {
+/**
+ * Parses `POLARIS_ALIASES`. Entries are comma-separated and may be either a
+ * bare `G…` address or a `name=G…` pair; the address is what gets used, so the
+ * optional alias name is stripped before the address is handed to the SDK.
+ */
+export function parseAliases(value) {
   if (!value) return [];
   return value
     .split(",")
     .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0)
+    .map((entry) => {
+      const separator = entry.indexOf("=");
+      return (separator === -1 ? entry : entry.slice(separator + 1)).trim();
+    })
     .filter((entry) => entry.length > 0);
 }
 
@@ -88,24 +98,61 @@ async function readJson(request) {
   }
 }
 
+/** Default account loader: fetches the owner account from Horizon, with a timeout. */
+async function loadAccountFromHorizon({ owner, horizonUrl }) {
+  const server = new Horizon.Server(horizonUrl);
+  return withTimeout(server.loadAccount(owner), 4000);
+}
+
+/**
+ * Reads the sequence off a Horizon `AccountResponse`. On that type
+ * `sequenceNumber` is a method, so it must be invoked; anything that is not a
+ * numeric string is a bug and throws rather than quietly degrading to the
+ * offline placeholder.
+ */
+function accountSequence(account) {
+  const value =
+    account && typeof account.sequenceNumber === "function"
+      ? account.sequenceNumber()
+      : account?.sequenceNumber;
+  if (typeof value !== "string" || !/^\d+$/.test(value)) {
+    throw new Error(`account sequenceNumber must be a numeric string, got ${typeof value}`);
+  }
+  return value;
+}
+
 /**
  * Builds the unsigned payment. Uses the live Horizon sequence when reachable,
  * otherwise a labelled placeholder so the page can still be exercised offline
- * (the signed result is verified locally and never submitted).
+ * (the signed result is verified locally and never submitted). The account
+ * loader is injectable so the network path can be tested without Horizon.
  */
-async function buildUnsignedPayload({ owner, destination, horizonUrl, networkPassphrase }) {
+export async function buildUnsignedPayload({
+  owner,
+  destination,
+  horizonUrl,
+  networkPassphrase,
+  loadAccount = loadAccountFromHorizon,
+}) {
   let sequence = "0";
   let offlineReason = "Horizon was not tried";
   let offline = true;
 
   if (horizonUrl) {
+    let account = null;
+    let loadError = null;
     try {
-      const server = new Horizon.Server(horizonUrl);
-      const account = await withTimeout(server.loadAccount(owner), 4000);
-      sequence = account.sequenceNumber;
-      offline = false;
+      account = await loadAccount({ owner, horizonUrl });
     } catch (error) {
-      offlineReason = error instanceof Error ? error.message : String(error);
+      loadError = error;
+    }
+    if (loadError) {
+      // Only a genuine load failure (e.g. Horizon unreachable) falls back to
+      // the placeholder; a wrong-typed sequence below is not caught here.
+      offlineReason = loadError instanceof Error ? loadError.message : String(loadError);
+    } else {
+      sequence = accountSequence(account);
+      offline = false;
     }
   }
 
@@ -185,12 +232,13 @@ async function serveStatic(response, pathname) {
  * Starts the fixture server. Resolves once it is listening; `resultReady`
  * resolves with the outcome once the page posts a result.
  */
-async function startFixtureServer({ owner, destination, horizonUrl, networkPassphrase }) {
+async function startFixtureServer({ owner, destination, horizonUrl, networkPassphrase, loadAccount }) {
   const { payload, offline } = await buildUnsignedPayload({
     owner,
     destination,
     horizonUrl,
     networkPassphrase,
+    loadAccount,
   });
 
   const token = randomBytes(24).toString("hex");
@@ -373,8 +421,13 @@ async function runLive() {
   process.exit(1);
 }
 
-if (process.argv.includes("--selftest")) {
-  await runSelftest();
-} else {
-  await runLive();
+const invokedDirectly =
+  Boolean(process.argv[1]) && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (invokedDirectly) {
+  if (process.argv.includes("--selftest")) {
+    await runSelftest();
+  } else {
+    await runLive();
+  }
 }
