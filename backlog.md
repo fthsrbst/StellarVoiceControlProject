@@ -25,6 +25,7 @@
 | 2026-09-20 | **W4b-1 — Rust bridge server + independent signature verification**: one-shot loopback `tiny_http` session (one-time token, TTL, const-time compare, Host/Origin/CSP caps), `bridge_sign`/`bridge_selftest`/`bridge_health`, parse-free XDR verification + in-repo StrKey, browser launcher; real browser + Freighter round trip still needs a human | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/w4b-bridge-server.md` | P0 |
 | 2026-09-20 | **W0d — shared panel tx pipeline**: `app/src/lib/txPipeline.ts` (`runTx`/`runTxSequence`, injectable deps, never throws) + `useTxRun.ts` hook, reuse the Touch ID approver/`signAndSubmit`; fake-based tests; docs §10 | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/w0d-tx-pipeline.md` | P1 |
 | 2026-09-20 | **F3 — STT reliability**: bilingual Groq `prompt` (aliases from `POLARIS_ALIASES`), one-shot allowed-language retry (`POLARIS_STT_ALLOWED_LANGS`), short-audio hallucination filter, `GroqTransport` seam + `npm run stt:probe` live table; real-mic run still needs a human | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/f3-stt-vocab.md` | P0 |
+| 2026-09-20 | **F3-fix — prompt leak**: language-aware prompt (EN/TR only when forced), prompt-echo + forced-language-mismatch filters, 700 ms pre-API minimum, agent unintelligible-transcript rule; live probe shows no echo; real-mic run still needs a human | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/f3-stt-vocab.md` | P0 |
 
 ## Completed Tasks (Archive)
 
