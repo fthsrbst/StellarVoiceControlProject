@@ -1,67 +1,135 @@
-import { useCallback, useEffect, useState } from "react";
-import type { AppInfo, PolarisEvent } from "@polaris/interfaces";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { Button } from "@/components/ui/button";
+import { getBridgeHealth, getVoiceHealth } from "@/debug/commands";
+import { redact } from "@/debug/redact";
+import { AGENT_MODEL, AGENT_PROVIDER } from "@/lib/agent";
 import { getAppInfo } from "@/lib/polaris";
-import { usePolarisEvents } from "@/panels/events";
+import { getStellarConfig } from "@/lib/stellarConfig";
 import { PanelNote, PanelShell } from "@/panels/PanelShell";
+import {
+  buildSettingsView,
+  type SettingsInput,
+  type VoiceFacts,
+} from "@/panels/settings/settingsModel";
+import { StatusBadge } from "@/panels/settings/StatusBadge";
 
 /**
- * Settings panel skeleton.
+ * Settings panel (T1).
  *
- * Shows build/network metadata read through `@/lib/polaris` and the latest error
- * the shell reported, so it doubles as a small diagnostics surface. The real
- * preferences and security profiles arrive in milestone W2.
+ * A read-only status board for the voice stack and the chain config. It reads
+ * `voice_health` and `stellar_config` (plus `app_info` and the bundled agent
+ * model) and renders one row per setting with a status badge and the `.env`
+ * variable that changes it. Secrets appear only as present/not set: the window
+ * never receives a key value and has no editor for one.
  */
 export function SettingsPanel() {
-  const [info, setInfo] = useState<AppInfo | null>(null);
-  const [lastError, setLastError] = useState<string | null>(null);
-
-  const onEvent = useCallback((event: PolarisEvent) => {
-    if (event.type === "error") setLastError(event.message);
-  }, []);
-  usePolarisEvents(onEvent);
+  const [version, setVersion] = useState<string | null>(null);
+  const [voice, setVoice] = useState<VoiceFacts | null>(null);
+  const [chain, setChain] = useState<SettingsInput["chain"]>(null);
+  const [bridge, setBridge] = useState<SettingsInput["bridge"]>(null);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
 
   useEffect(() => {
     let cancelled = false;
-    getAppInfo()
-      .then((next) => {
-        if (!cancelled) setInfo(next);
+    const warn = (label: string) => (error: unknown) =>
+      console.warn(`settings could not read ${label}`, error);
+    void getAppInfo()
+      .then((info) => {
+        if (!cancelled) setVersion(info.version);
       })
-      .catch((error: unknown) => {
-        if (!cancelled) console.warn("settings could not read app_info", error);
-      });
+      .catch(warn("app_info"));
+    void getVoiceHealth()
+      .then((next) => {
+        if (!cancelled) setVoice(next);
+      })
+      .catch(warn("voice_health"));
+    void getStellarConfig()
+      .then((next) => {
+        if (!cancelled) setChain(next);
+      })
+      .catch(warn("stellar_config"));
+    void getBridgeHealth()
+      .then((next) => {
+        if (!cancelled) setBridge({ status: next.status, detail: next.detail });
+      })
+      .catch(warn("bridge_health"));
     return () => {
       cancelled = true;
     };
   }, []);
 
+  const view = useMemo(
+    () => buildSettingsView({ version, voice, chain, agentModel: AGENT_MODEL, bridge }),
+    [version, voice, chain, bridge],
+  );
+
+  const copyDiagnostics = useCallback(async () => {
+    const report = {
+      generatedAt: new Date().toISOString(),
+      app: { version },
+      agent: { provider: AGENT_PROVIDER, model: AGENT_MODEL },
+      chain,
+      settings: view.flatMap((section) =>
+        section.rows.map((row) => ({ id: row.id, status: row.status, value: row.value })),
+      ),
+    };
+    try {
+      await navigator.clipboard.writeText(redact(JSON.stringify(report, null, 2)));
+      setCopyState("copied");
+    } catch (error: unknown) {
+      console.warn("settings could not copy diagnostics", error);
+      setCopyState("failed");
+    }
+  }, [version, chain, view]);
+
   return (
-    <PanelShell title="Settings" subtitle="Preferences and security">
+    <PanelShell title="Settings" subtitle="Read-only configuration and diagnostics">
       <div className="space-y-4">
         <PanelNote>
-          Preferences and security profiles land in milestone W2. This shell only
-          reads app metadata and the error stream — it never handles a secret.
+          Read-only. Secrets appear only as “present” or “not set”; this window
+          never shows or edits a key.
         </PanelNote>
-        <dl className="space-y-2 text-xs">
-          <div className="flex justify-between gap-4">
-            <dt className="text-polaris-muted">Version</dt>
-            <dd className="selectable">{info?.version ?? "…"}</dd>
-          </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-polaris-muted">Network</dt>
-            <dd className="selectable">{info?.network ?? "…"}</dd>
-          </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-polaris-muted">Tauri</dt>
-            <dd className="selectable">{info?.tauriVersion ?? "…"}</dd>
-          </div>
-        </dl>
-        <div className="space-y-1 text-xs">
-          <p className="text-polaris-muted">Latest error</p>
-          <p className="selectable break-words text-polaris-danger">
-            {lastError ?? "None in this session"}
-          </p>
+
+        <div className="flex items-center justify-end gap-2">
+          {copyState === "copied" ? <span className="text-xs text-polaris-ok">Copied</span> : null}
+          {copyState === "failed" ? (
+            <span className="text-xs text-polaris-danger">Copy failed</span>
+          ) : null}
+          <Button variant="outline" size="sm" onClick={() => void copyDiagnostics()}>
+            Copy diagnostics
+          </Button>
         </div>
+
+        {view.map((section) => (
+          <section
+            key={section.id}
+            className="space-y-2 rounded-lg border border-polaris-line bg-polaris-panel/40 p-3"
+          >
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-polaris-muted">
+              {section.title}
+            </h2>
+            <ul className="space-y-2">
+              {section.rows.map((row) => (
+                <li
+                  key={row.id}
+                  className="space-y-0.5 border-b border-polaris-line/50 pb-2 last:border-0 last:pb-0"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-polaris-muted">{row.label}</span>
+                    <StatusBadge status={row.status} />
+                  </div>
+                  <p className="selectable break-words font-mono text-xs">{row.value}</p>
+                  {row.envVar ? (
+                    <p className="text-[10px] text-polaris-muted">
+                      Change in .env: <code className="selectable">{row.envVar}</code>
+                    </p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
       </div>
     </PanelShell>
   );

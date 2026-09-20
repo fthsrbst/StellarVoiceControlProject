@@ -868,8 +868,9 @@ mod tests {
             payload: payload(OWNER, &xdr),
             signer_key: public,
             assets: Arc::new(FakeAssets),
-            launcher: Arc::new(PageLauncher { seed, tamper: false }),
+            launcher: Arc::new(PageLauncher { seed, tamper: false, challenge: false }),
             browser: None,
+            challenge: false,
         };
         let outcome = context.finish(SessionOutcome::Success(PageResult::Success {
             signed_xdr: "ignored".to_string(),
