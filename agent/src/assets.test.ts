@@ -15,7 +15,7 @@ test("the prompt names every supported asset from the single list (step A13)", (
   for (const asset of SUPPORTED_ASSETS) {
     assert.ok(POLARIS_SYSTEM_PROMPT.includes(asset), `prompt must mention ${asset}`);
   }
-  assert.match(POLARIS_SYSTEM_PROMPT, new RegExp(`defaults to ${DEFAULT_ASSET}`));
+  assert.match(POLARIS_SYSTEM_PROMPT, /there is no default/);
   for (const word of Object.keys(ASSET_SYNONYMS)) {
     assert.ok(POLARIS_SYSTEM_PROMPT.includes(word), `prompt must mention the word ${word}`);
   }

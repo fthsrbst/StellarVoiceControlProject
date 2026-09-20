@@ -128,6 +128,16 @@ export {
   type SendPaymentInput,
 } from "./tools/payment.ts";
 export {
+  balanceSentence,
+  formatBalanceAmount,
+  getBalanceTool,
+  trimAmount,
+  type AssetBalance,
+  type BalanceReader,
+  type BalanceResult,
+  type GetBalanceInput,
+} from "./tools/balance.ts";
+export {
   depositTool,
   FIAT_CODE,
   normalizeFiat,

@@ -7,6 +7,7 @@ import { AgentError } from "./errors.ts";
 import { createEventBus } from "./events.ts";
 import { runTurn, type AgentLlm, type LlmTurn } from "./loop.ts";
 import { createDefaultRegistry } from "./runtime.ts";
+import { getBalanceTool } from "./tools/balance.ts";
 import { noopTool } from "./tools/noop.ts";
 import { sendPaymentTool } from "./tools/payment.ts";
 import { createToolRegistry } from "./tools/registry.ts";
@@ -139,6 +140,19 @@ test("a non-approval tool still runs and feeds the round trip", async () => {
   assert.deepEqual(result.executedTools, ["noop"]);
   assert.equal(result.intent, undefined);
   assert.match(result.answer, /noop -> /);
+});
+
+test("a read-only tool's toSpeech sentence is spoken instead of raw JSON (T1)", async () => {
+  const result = await runTurn({
+    transcript: "what's my balance",
+    registry: createToolRegistry().register(getBalanceTool),
+    llm: new ScriptedLlm({ toolCalls: [{ name: "get_balance", input: { language: "en" } }] }),
+    bus: createEventBus(),
+    toolContext: { readBalances: async () => [{ code: "XLM", amount: "9989.0000000" }] },
+  });
+  assert.equal(result.answer, "You have 9,989 XLM.");
+  assert.deepEqual(result.executedTools, ["get_balance"]);
+  assert.equal(result.intent, undefined);
 });
 
 test("an unknown tool is a programming error, not an intent", async () => {

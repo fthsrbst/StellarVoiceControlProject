@@ -21,6 +21,8 @@ import {
   toAgentError,
   type AgentProvider,
   type AliasMap,
+  type AssetBalance,
+  type BalanceReader,
 } from "@polaris/agent";
 import type { AgentStage, Intent } from "@polaris/interfaces";
 import { markTurnPhase } from "@/lib/polaris";
@@ -141,6 +143,8 @@ const llm =
 interface PromptAccounts {
   ownerAddress: string | null;
   aliases: AliasMap;
+  /** Horizon base URL from `stellar_config`, for the `get_balance` reader (T1). */
+  horizonUrl: string | null;
 }
 
 const committedAliasAddresses: AliasMap = Object.fromEntries(
@@ -157,9 +161,49 @@ function loadPromptAccounts(): Promise<PromptAccounts> {
     .then((config) => ({
       ownerAddress: config.ownerAddress,
       aliases: { ...committedAliasAddresses, ...config.aliases },
+      horizonUrl: config.horizonUrl,
     }))
-    .catch(() => ({ ownerAddress: null, aliases: committedAliasAddresses }));
+    .catch(() => ({ ownerAddress: null, aliases: committedAliasAddresses, horizonUrl: null }));
   return accountsPromise;
+}
+
+/**
+ * The read-only balance reader handed to `get_balance` (T1).
+ *
+ * It reuses the chain lane's `@polaris/stellar` Horizon client, so there is one
+ * network path; the SDK is imported lazily, so only a balance question pays for
+ * it. The owner address and Horizon URL come from `stellar_config`, never from
+ * the bundle. A network failure is left to the tool, which answers with a short
+ * "can't read" sentence rather than guessing a number.
+ */
+async function readOwnerBalances(
+  ownerAddress: string,
+  horizonUrl: string,
+): Promise<readonly AssetBalance[]> {
+  const { anchor } = await import("@polaris/stellar");
+  const account = await anchor.loadAccount(
+    {
+      fetch: (input, init) => fetch(input, init),
+      explain: new anchor.ExplainLog(),
+      horizonUrl,
+      friendbotUrl: anchor.TESTNET_FRIENDBOT_URL,
+      networkPassphrase: anchor.TESTNET_PASSPHRASE,
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      now: () => new Date(),
+      requestTimeoutMs: 20_000,
+    },
+    ownerAddress,
+  );
+  if (!account) return [];
+  return account.balances.flatMap((balance) => {
+    const code =
+      balance.asset_type === "native"
+        ? "XLM"
+        : balance.asset_type === "credit_alphanum4" || balance.asset_type === "credit_alphanum12"
+          ? balance.asset_code
+          : undefined;
+    return code ? [{ code, amount: balance.balance }] : [];
+  });
 }
 
 let systemPromptPromise: Promise<string> | undefined;
@@ -216,13 +260,23 @@ export async function runAgentTurn(
     // ("wallet 2", "ek 2") are normalised before the model sees the transcript.
     const accounts = await loadPromptAccounts();
     const system = await loadSystemPrompt(accounts);
+    // T1: `get_balance` reads the owner's balances through this injected reader;
+    // without an owner or a Horizon URL the tool says it cannot read rather than
+    // guessing.
+    const owner = accounts.ownerAddress;
+    const horizon = accounts.horizonUrl;
+    const readBalances: BalanceReader | undefined =
+      owner && horizon ? () => readOwnerBalances(owner, horizon) : undefined;
     const result = await runTurn({
       transcript,
       registry,
       llm: new AccountRefLlm(llm, accounts.aliases),
       bus,
       system,
-      toolContext: { aliases: { ...accounts.aliases } },
+      toolContext: {
+        aliases: { ...accounts.aliases },
+        ...(readBalances ? { readBalances } : {}),
+      },
       ...(transcriptLanguage ? { transcriptLanguage } : {}),
     });
     // A11: the provider response has been parsed into a turn result by now.
