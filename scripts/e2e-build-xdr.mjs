@@ -5,10 +5,12 @@
 // It exercises the exact chain-lane path the shell uses, with no voice and no
 // signing: the owner account is loaded READ-ONLY from testnet Horizon, an
 // unsigned native-XLM payment XDR is built for the given amount to `acc2`, and
-// the decoded summary + payload hash are printed. It never signs, never submits,
-// and never reads a secret (the owner is a public address).
+// the decoded summary, the XDR digest and the Stellar transaction hash are
+// printed (labelled, because they are different values). It never signs, never
+// submits, and never reads a secret (the owner is a public address).
 import { readFileSync } from "node:fs";
 
+import { xdrDigest } from "../agent/src/execution.ts";
 import { TESTNET_HORIZON_URL, TESTNET_PASSPHRASE } from "../stellar/src/anchor/config.ts";
 import {
   createSendPayment,
@@ -57,6 +59,10 @@ const result = await tool({ kind: "send", asset: "XLM", amount, recipient });
 
 console.log("summary:");
 console.log(JSON.stringify(result.summary, null, 2));
-console.log(`payloadHash: ${payloadHashOf(result.unsignedXdr, TESTNET_PASSPHRASE)}`);
+// Two different values, labelled so they cannot be confused:
+//  - xdrDigest: SHA-256 of the base64 XDR string; the approval gate's `payloadHash`.
+//  - txHash:    the Stellar transaction hash (Transaction.hash()); explorer id.
+console.log(`xdrDigest: ${xdrDigest(result.unsignedXdr)}`);
+console.log(`txHash: ${payloadHashOf(result.unsignedXdr, TESTNET_PASSPHRASE)}`);
 console.log(`unsignedXdr: ${result.unsignedXdr}`);
 console.log("nothing was signed or submitted");

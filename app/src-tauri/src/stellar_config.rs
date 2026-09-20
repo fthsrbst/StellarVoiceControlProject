@@ -11,10 +11,11 @@
 //!   else in the process environment is ever returned, so a secret that happens
 //!   to be set (a provider key, a keeper secret) can never ride this command to
 //!   the webview.
-//! * **Validated.** The owner address and every alias must be a `G...` StrKey
-//!   shape; an alias name must match the alias-book charset. Anything malformed
-//!   is dropped, so a typo becomes "not configured" (fail-closed), never a wrong
-//!   destination.
+//! * **Validated.** The owner address and every alias must be a valid `G...`
+//!   StrKey (base32 + version byte + CRC16-XModem checksum, so a single-character
+//!   typo is caught here); an alias name must match the alias-book charset.
+//!   Anything malformed is dropped, so a typo becomes "not configured"
+//!   (fail-closed), never a wrong destination.
 //! * **Testnet only.** Defaults are the public testnet endpoints; the app never
 //!   signs or submits here — this is read-only configuration.
 
@@ -47,13 +48,61 @@ pub struct StellarConfig {
     pub guard_contract_id: Option<String>,
 }
 
-/// A Stellar ed25519 public key StrKey shape: 56 base32 chars, leading `G`.
+/// Decodes RFC 4648 base32 (`A-Z2-7`) without padding, or `None` on a bad char.
+fn base32_decode(input: &str) -> Option<Vec<u8>> {
+    let mut value: u32 = 0;
+    let mut bits: u32 = 0;
+    let mut out = Vec::with_capacity(input.len() * 5 / 8);
+    for byte in input.bytes() {
+        let digit = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'2'..=b'7' => byte - b'2' + 26,
+            _ => return None,
+        };
+        value = (value << 5) | u32::from(digit);
+        bits += 5;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((value >> bits) as u8);
+        }
+    }
+    Some(out)
+}
+
+/// CRC16-XModem (poly `0x1021`, init 0), the checksum Stellar StrKeys use.
+fn crc16_xmodem(data: &[u8]) -> u16 {
+    let mut crc: u16 = 0;
+    for byte in data {
+        crc ^= u16::from(*byte) << 8;
+        for _ in 0..8 {
+            crc = if crc & 0x8000 != 0 {
+                (crc << 1) ^ 0x1021
+            } else {
+                crc << 1
+            };
+        }
+    }
+    crc
+}
+
+/// A Stellar ed25519 public-key StrKey: 56 base32 chars, version byte `0x30`,
+/// and a valid CRC16-XModem checksum (m-6). Shape-only validation would accept a
+/// single-character typo that keeps the charset, deferring the failure to a
+/// Horizon `loadAccount`; the checksum catches it here (fail-closed).
 fn is_public_key(value: &str) -> bool {
-    value.len() == 56
-        && value.starts_with('G')
-        && value
-            .bytes()
-            .all(|b| matches!(b, b'A'..=b'Z' | b'2'..=b'7'))
+    if value.len() != 56 {
+        return false;
+    }
+    let Some(decoded) = base32_decode(value) else {
+        return false;
+    };
+    // 1 version byte + 32 data bytes + 2 checksum bytes.
+    if decoded.len() != 35 || decoded[0] != 0x30 {
+        return false;
+    }
+    let expected = crc16_xmodem(&decoded[..33]);
+    let actual = u16::from_le_bytes([decoded[33], decoded[34]]);
+    expected == actual
 }
 
 /// The alias-name charset from `stellar/src/payments/aliases.ts` (C3):
@@ -190,9 +239,45 @@ mod tests {
             ("KEEPER_SECRET", "S-super-secret"),
             ("OPENCODE_API_KEY", "sk-super-secret"),
         ]);
+        let value: serde_json::Value = serde_json::to_value(&config).unwrap();
+        let mut keys: Vec<&str> = value
+            .as_object()
+            .expect("the config serializes to an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        // The exact wire key set: seven allow-listed fields, nothing else.
+        assert_eq!(
+            keys,
+            [
+                "aliases",
+                "guardContractId",
+                "horizonUrl",
+                "network",
+                "networkPassphrase",
+                "ownerAddress",
+                "rpcUrl",
+            ]
+        );
         let json = serde_json::to_string(&config).unwrap();
         assert!(!json.contains("secret"));
         assert!(json.contains(OWNER));
+    }
+
+    #[test]
+    fn rejects_a_shape_valid_address_with_a_bad_checksum() {
+        // Last character changed: still 56 base32 chars with a leading `G`, but
+        // the CRC16-XModem checksum no longer matches (m-6).
+        let mutated = "GAJW5V7VXHIRTJBGNVYTGXJ6CLDM7IEIPAYD3XLKKTKJKPRBYOTAC25B";
+        assert!(!is_public_key(mutated));
+        assert_eq!(
+            from_pairs(&[("POLARIS_OWNER_ADDRESS", mutated)]).owner_address,
+            None
+        );
+        // The real fixtures have valid StrKeys.
+        assert!(is_public_key(OWNER));
+        assert!(is_public_key(ACC2));
     }
 
     #[test]
