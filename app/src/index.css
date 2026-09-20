@@ -564,6 +564,12 @@
 }
 
 /* --- History page --- */
+.history-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
 .history-row {
   display: flex;
   align-items: flex-start;
