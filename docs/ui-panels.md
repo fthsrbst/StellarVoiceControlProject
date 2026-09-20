@@ -22,6 +22,7 @@ choose the component.
 | Wallet | `panel-wallet` | `#/wallet` | 420×600 | normal window, resizable |
 | Approval | `panel-approval` | `#/approval` | 440×520 | always on top, not resizable |
 | Settings | `panel-settings` | `#/settings` | 520×600 | normal window, resizable |
+| Debug | `panel-debug` | `#/debug` | 480×680 | normal window, resizable |
 
 One instance per label: the first open builds the window, later opens show and
 focus it. Closing a panel **hides** it (`panels::handle_window_event`) so its
@@ -51,6 +52,8 @@ status item is the only chrome. It is built in `lib.rs::setup_tray`:
 
 - **Wallet…** → `panels::open(app, panels::WALLET)`
 - **Settings…** → `panels::open(app, panels::SETTINGS)`
+- **Debug…** → `panels::open(app, panels::DEBUG)` (the check registry and event
+  tail; see `docs/debug-panel.md`)
 - **Quit Polaris** → `app.exit(0)`
 
 The approval panel is intentionally **not** in the tray: it is opened by the
@@ -89,9 +92,10 @@ Two wrappers, both in `app/src/lib/`:
   `tx_submitted`, `error`, …
 
 - **Commands:** `openPanel(name)` from `@/lib/panels` opens another panel
-  (`open_panel`). No other panel command exists yet; add new ones to
+  (`open_panel`). No other panel command exists yet; add new shared commands to
   `app/src/lib/` (never call `invoke` ad hoc from a component) so the Rust
-  contract stays in one place.
+  contract stays in one place. Debug-only commands are the one exception and are
+  centralised in `app/src/debug/commands.ts` (`docs/debug-panel.md`).
 
 ## 6. Rules — do / don't
 
@@ -132,9 +136,9 @@ cargo clippy --manifest-path app/src-tauri/Cargo.toml -- -D warnings
 
 **Automated (covered by tests)**
 
-- `parsePanelRoute` maps the three routes and falls back to the notch for
+- `parsePanelRoute` maps the four routes and falls back to the notch for
   unknown/malformed hashes (`app/src/panels/panelRoutes.test.ts`).
-- The Rust registry is the three known panels, rejects unknown names with
+- The Rust registry is the four known panels, rejects unknown names with
   `PanelError::UnknownPanel`, and every spec has sane geometry, a `#/name`
   route and a `panel-*` label (`app/src-tauri/src/panels.rs`).
 - `npm run check`, `npm test -w @polaris/app`, `npm run build -w @polaris/app`,
