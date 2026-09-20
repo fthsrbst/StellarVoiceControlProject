@@ -11,7 +11,7 @@
 # Deploy: stellar contract deploy ... (contract IDs are documented in the README)
 [workspace]
 resolver = "2"
-members = ["polaris_guard"]
+members = ["polaris_guard", "polaris_p2p_escrow"]
 
 [workspace.package]
 version = "0.1.0"

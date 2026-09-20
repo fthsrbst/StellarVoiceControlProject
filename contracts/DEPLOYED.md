@@ -357,3 +357,56 @@ was refused with `#110`, `list_due --cursor 0 --limit 100` returned `[[1],0]`, a
 keeper settled the schedule. Payee ended at `108.0000000 PGUSD` (the asset carries
 balances from the superseded deployments' demo runs too); `spent_today` for the owner
 read `350000000` raw units — 3 + 25 + 7 PGUSD through this contract.
+
+---
+
+# polaris_p2p_escrow — testnet deployment
+
+Testnet only. No mainnet deployment exists and none is planned for this milestone.
+The crate is `contracts/polaris_p2p_escrow`; its ABI and trust model are documented
+in `src/lib.rs`. **There is no arbiter:** the seller alone decides whether fiat
+arrived, so a buyer who pays TRY off-chain can still lose the race to `reclaim`.
+
+| | |
+|---|---|
+| Contract | `polaris_p2p_escrow` |
+| Network | Stellar **testnet** |
+| Contract ID | `CBMXLTXS76S72SIPLVMCQOSS6SN2CR4V3Q73GZPRA4GRIBEM7RE5OLJW` |
+| Wasm upload tx | `045437462e6eca6d08b88940ed6be7cd8d243fb20d3072d3e6fe36897b7e82e5` |
+| Deploy tx | `14f1523307963e96d91a002875e38e6b395e7ebd06255d4fd79f4eaa756ce384` |
+| Deployer | `w8-deployer` (`GAXZBZ3TOUBORMH2NNRC3LNNCVIQMDNQV7K4HHUAKOEE3AIJMHGGD57P`) |
+| Wasm | `contracts/target/wasm32v1-none/release/polaris_p2p_escrow.wasm`, 12,663 bytes, 8 exported fns |
+| Wasm sha256 | `59822484ade82fcdff342c378cc316fee0e8e8c76e829887e9e8b787e095ff16` |
+| Explorer | https://stellar.expert/explorer/testnet/contract/CBMXLTXS76S72SIPLVMCQOSS6SN2CR4V3Q73GZPRA4GRIBEM7RE5OLJW |
+
+Build: `caffeinate -i stellar contract build --manifest-path contracts/Cargo.toml`.
+
+> **stellar-cli 28 note:** `--network testnet` failed here with *"rpc-url is used but
+> network passphrase is missing"*. Pass the network explicitly:
+> `--rpc-url https://soroban-testnet.stellar.org --network-passphrase "Test SDF Network ; September 2015"`.
+> Also `stellar tx new payment --amount` is in **raw units**, not display units:
+> `--amount 10000000000` issues 1000 of a 7-decimal token.
+
+## Demo run (create -> accept -> confirm), throwaway identities
+
+Throwaway asset `W8USD:GABOXZIVENMVYAMJ2L2TL2AE6UHABJTEHEVFGNDCFJATNYGMYOAVABZG`,
+SAC `CD5PXNKTSAEOVHXJCZTY5CVVDYEPDZCE7XFSBZGVBITY5NGP425BLNZ7` (trustlines + issue
+via the `w8-issuer` identity). Roles: seller `w8-seller`
+(`GAIDDXF5NC3H7DV74RVS4WJ4T4YHIS2VOEWDYPZLNQSMB6BBQCARTQFK`), buyer `w8-buyer`
+(`GCH763526NVDMFWOV245SCL46QFP4DBKWAHEJNX4BAPVVW2CIXYTDIRN`).
+
+```bash
+# Seller locks 100 W8USD (raw units) asking 4,000 TRY.
+stellar contract invoke --id $ESCROW --source-account w8-seller <net flags> -- \
+  create_offer --seller $SELLER --token $SAC --amount 1000000000 --price_try_kurus 400000 --ttl_secs 3600
+stellar contract invoke --id $ESCROW --source-account w8-buyer  <net flags> -- \
+  accept --buyer $BUYER --offer_id 1
+stellar contract invoke --id $ESCROW --source-account w8-seller <net flags> -- \
+  confirm_fiat --seller $SELLER --offer_id 1
+```
+
+Verified 2026-09-20 against `CBMXLTXS76…`: offer `1` went `Open` -> `Accepted`
+(`pay_deadline` = `accepted_at + 1800`) -> `Settled` (`OfferCreated`/`OfferAccepted`/
+`OfferSettled` events). Balances: seller `2000.0001000` -> `1900.0001000`, escrow
+`100` -> `0`, buyer `0` -> `100` W8USD. **Not exercised on-chain:** reclaim/cancel,
+multi-offer paging, and the 7-day TTL cap (covered by the 20 host tests).
