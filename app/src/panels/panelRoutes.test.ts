@@ -13,6 +13,7 @@ test("each known panel route parses to its panel", () => {
   assert.deepEqual(parsePanelRoute("#/wallet"), { kind: "panel", panel: "wallet" });
   assert.deepEqual(parsePanelRoute("#/approval"), { kind: "panel", panel: "approval" });
   assert.deepEqual(parsePanelRoute("#/settings"), { kind: "panel", panel: "settings" });
+  assert.deepEqual(parsePanelRoute("#/debug"), { kind: "panel", panel: "debug" });
 });
 
 test("trailing slashes, a missing hash and a query string are tolerated", () => {
@@ -40,6 +41,7 @@ test("isPanelName accepts only the registry names", () => {
   assert.equal(isPanelName("wallet"), true);
   assert.equal(isPanelName("approval"), true);
   assert.equal(isPanelName("settings"), true);
+  assert.equal(isPanelName("debug"), true);
   assert.equal(isPanelName("Wallet"), false);
   assert.equal(isPanelName("main"), false);
   assert.equal(isPanelName(""), false);

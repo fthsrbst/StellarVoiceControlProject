@@ -10,9 +10,14 @@
  */
 
 /** Panels that exist. Must match the Rust allow-list one-for-one. */
-export type PanelName = "wallet" | "approval" | "settings";
+export type PanelName = "wallet" | "approval" | "settings" | "debug";
 
-export const PANEL_NAMES: readonly PanelName[] = ["wallet", "approval", "settings"];
+export const PANEL_NAMES: readonly PanelName[] = [
+  "wallet",
+  "approval",
+  "settings",
+  "debug",
+];
 
 /** A parsed window route: either the notch overlay, or one panel. */
 export type PanelRoute = { kind: "notch" } | { kind: "panel"; panel: PanelName };
