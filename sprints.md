@@ -177,6 +177,7 @@
 - [ ] Anchor flow: SEP-10/38/6 TRY mock deposit → USDC balance, driven by voice
   - SEP-6 client merged ([PR #11](https://github.com/n0tnow/StellarVoiceControlProject/pull/11)); voice wiring pending (Owner A, not on the chain-lane critical path)
   - [x] (2026-09-20, branch `feat/w5b-anchor-flows`) **W5b.** App-side anchor `Signer` (seq-0 wallet-only `bridge_sign_challenge`, else Touch ID pipeline) + `createAnchorSession`, voice `deposit`/`withdraw` intents, Anchor panel + Debug check; live Touch ID/Freighter needs a human — `backlog/w5b-anchor-flows.md`
+  - [x] (2026-09-20, branch `feat/w5b-anchor-flows`) **W5b-fix.** Review corrections: the real pipeline captures the signed XDR (fake-bridge tests), voice `deposit`/`withdraw` drive `runAnchorIntent` on the panel `AnchorSession`, stricter missing-command check, directional step mapping, configured passphrase — `backlog/w5b-anchor-flows.md`
 - [ ] Protocol integration: Soroswap swap OR DeFindex vault (pick ONE via testnet spike, do not attempt both)
 - [ ] Approval card UI polished (Stellar Design System / shadcn), explorer links on card
 - [ ] (optional if time) MPP pay-per-command session
