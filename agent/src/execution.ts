@@ -87,6 +87,8 @@
  */
 import type { ChainTool, ChainToolResult, Intent, IntentKind } from "@polaris/interfaces";
 
+import { refusalLabel } from "./errors.ts";
+
 /* ------------------------------------------------------------------ *
  * Approval gate
  * ------------------------------------------------------------------ */
@@ -454,7 +456,14 @@ export async function executeIntent(
         detail: detailOf(error),
       };
     }
-    return { status: "failed", intent, label: "Chain error", detail: detailOf(error) };
+    // F4: a typed refusal (unknown recipient, bad amount, unsupported asset, …)
+    // gets a specific label instead of the generic "Chain error".
+    return {
+      status: "failed",
+      intent,
+      label: refusalLabel(refusalCode(error)),
+      detail: detailOf(error),
+    };
   }
 
   // Fail closed on a malformed result (M-2): no `unsignedXdr`, no `executed`.

@@ -57,6 +57,7 @@ import {
   type SigningDeps,
 } from "@/lib/signing";
 import type { PaymentStage } from "@/lib/turnSession";
+import { webLog } from "@/lib/weblog";
 import committedAliases from "../../../stellar/config/aliases.json";
 
 /**
@@ -161,6 +162,22 @@ async function ensurePaymentsConfigured(): Promise<void> {
 }
 
 /**
+ * Logs one non-executed outcome to the Rust terminal with enough context to
+ * debug it (label, detail, intent kind/asset/amount/recipient). It deliberately
+ * never logs the unsigned or signed XDR — only the redacted detail.
+ */
+function logFailure(outcome: SubmittedOutcome): void {
+  if (outcome.status === "executed") return;
+  const { kind, asset, amount, recipient, alias } = outcome.intent;
+  webLog(
+    "error",
+    `chain ${outcome.status}: ${outcome.label ?? "Chain error"} — ${outcome.detail ?? ""} ` +
+      `(kind=${kind} asset=${asset} amount=${amount} recipient=${recipient ?? alias ?? "unknown"})`,
+    true,
+  );
+}
+
+/**
  * Executes one validated intent down the single seam: build → approve → sign →
  * submit.
  *
@@ -188,12 +205,14 @@ export async function executeApprovedIntent(
     await ensurePaymentsConfigured();
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    return {
+    const failure: SubmittedOutcome = {
       status: "failed",
       intent,
       label: detail.includes("POLARIS_OWNER_ADDRESS") ? "Set POLARIS_OWNER_ADDRESS" : "Chain not configured",
       detail,
     };
+    logFailure(failure);
+    return failure;
   }
   const { depositTry, guardPolicy, sendPayment, swap, withdrawTry } = await import(
     "@polaris/stellar"
@@ -221,5 +240,7 @@ export async function executeApprovedIntent(
   // both the approval gate and the sign/submit path.
   const approver = await approverFor(deps.onStage);
   const outcome: ExecutionOutcome = await executeIntent(intent, { approver, chainTools });
-  return signAndSubmit(outcome, deps);
+  const submitted = await signAndSubmit(outcome, deps);
+  logFailure(submitted);
+  return submitted;
 }

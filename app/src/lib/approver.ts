@@ -41,6 +41,7 @@ import type { IntentApprover, ApprovalRequest } from "@polaris/agent";
 
 import { approvalBegin, type ApprovalStatus, type InvokeFn } from "./approval.ts";
 import type { PaymentStage } from "./turnSession.ts";
+import { webLog } from "./weblog.ts";
 
 /**
  * How long to wait for the gate's decision. The Rust approval TTL is 120 s
@@ -258,14 +259,17 @@ export function createTouchIdApprover(deps: ApproverDeps): IntentApprover {
 
       const status = await waitForDecision(id, request.payloadHash, deps);
       if (status === null) {
+        webLog("error", `approval timed out after ${APPROVER_TIMEOUT_MS} ms`, true);
         return { approved: false, approvalId: id, reason: TIMEOUT_REASON };
       }
       if (status.state === "authorized") {
         return { approved: true, approvalId: id };
       }
       if (status.state === "expired") {
+        webLog("error", "approval request expired", true);
         return { approved: false, approvalId: id, reason: EXPIRED_REASON };
       }
+      webLog("error", `approval denied: ${status.reason ?? DENIED_BY_USER}`, true);
       return {
         approved: false,
         approvalId: id,

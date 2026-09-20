@@ -27,6 +27,7 @@ mod tts;
 mod tx_events;
 mod types;
 mod voice_health;
+mod weblog;
 
 use tauri::Manager;
 
@@ -67,6 +68,9 @@ pub fn run() {
             health::biometric_selftest,
             voice_health::voice_health,
             tx_events::tx_submitted_emit,
+            // Task F4: one webview log line in the terminal, optionally mirrored
+            // onto the `error` event the Debug panel renders.
+            weblog::polaris_log,
             bridge::commands::bridge_sign,
             bridge::commands::bridge_selftest,
             bridge::commands::bridge_health,

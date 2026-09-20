@@ -59,3 +59,39 @@ export function toAgentError(value: unknown): AgentError {
   if (isAgentError(value)) return value;
   return new AgentError("http", value instanceof Error ? value.message : String(value));
 }
+
+/**
+ * Short, overlay-safe labels for the chain's typed refusal codes (task F4).
+ *
+ * The codes are `PaymentRefusal.code` values from `@polaris/stellar`, matched
+ * structurally: the agent never imports the chain package, so they are plain
+ * strings here. Each label is deliberately specific ("I don't know that
+ * recipient" rather than "Chain error") so the notch, the spoken line and the
+ * terminal all name the real cause. An unknown code keeps the generic fallback.
+ */
+export const REFUSAL_LABELS: Record<string, string> = {
+  not_configured: "Chain not configured",
+  invalid_intent: "Bad payment request",
+  invalid_amount: "Invalid amount",
+  unsupported_asset: "Asset not supported",
+  unknown_recipient: "I don't know that recipient",
+  mode_not_supported: "Private payments unavailable",
+  guarded_route_not_available: "Guarded route unavailable",
+  recipient_no_trustline: "Recipient can't hold that asset",
+  trustline_check_failed: "Asset check failed",
+  account_not_found: "Account not funded",
+  guard_rule_missing: "No spending rule",
+  guard_limit_exceeded: "Spending limit reached",
+  guard_asset_not_allowed: "Asset not allowed",
+  guard_client_error: "Guard error",
+};
+
+/**
+ * The label for a refusal code, or `fallback` when the code is absent/unknown.
+ * A malformed chain result or a plain tool error carries no code and must still
+ * settle with a label, so the fallback is the existing generic one.
+ */
+export function refusalLabel(code?: string, fallback = "Chain error"): string {
+  if (!code) return fallback;
+  return REFUSAL_LABELS[code] ?? fallback;
+}
