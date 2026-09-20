@@ -3,11 +3,13 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   FALLBACK_SHELL_GEOMETRY,
   type CaptureStatus,
+  type NavigationRequest,
   type ShellGeometry,
 } from "@polaris/interfaces";
 
 import { runAgentTurn, type AgentOutcome } from "@/lib/agent";
 import { executeApprovedIntent } from "@/lib/chain";
+import { applyNavigation } from "@/lib/navigation";
 import { speakSentence, speakTurnResult } from "@/lib/speech";
 import { failureSentence, submittedSentence } from "@polaris/agent";
 import { TurnFlow } from "@/lib/turnFlow";
@@ -92,6 +94,10 @@ export default function App() {
   const [hotkeyTrusted, setHotkeyTrusted] = useState<boolean | null>(null);
   const [permissionHint, setPermissionHint] = useState(false);
   const [session, dispatchTurn] = useReducer(reduceTurnSession, null);
+  // NAV: the latest voice navigation request, handed to the shell so it can
+  // select a notch page or open a panel window. A fresh object per command is
+  // what re-triggers an identical request.
+  const [navigation, setNavigation] = useState<NavigationRequest | null>(null);
   // Admission/freshness policy for spoken turns: it dedupes a re-emitted
   // transcript and, the M2 fix, lets a genuine second utterance supersede an
   // in-flight turn instead of being dropped. Stable across renders.
@@ -215,6 +221,13 @@ export default function App() {
           // reply/voice (A14), so it also drives the notch labels from here on.
           dispatchTurn({ type: "language", language: run.outcome.language ?? null });
           recordTurnAnswer(logId, run.outcome.answer);
+          // NAV: a voice navigation request opens a screen. ShellSurface applies
+          // the notch page; panel windows open here. The spoken confirmation is
+          // the outcome's answer, spoken below like any conversational turn.
+          if (run.outcome.navigation) {
+            setNavigation(run.outcome.navigation);
+            void applyNavigation(run.outcome.navigation);
+          }
           if (!run.outcome.intent) {
             // A conversational turn has nothing to execute: speak the answer and
             // let the real `speech_status` stream end the turn.
@@ -456,6 +469,7 @@ export default function App() {
         voiceAttention={voiceAttention}
         label={label}
         detail={detail}
+        navigation={navigation}
       />
       <span
         className="sr-only"
