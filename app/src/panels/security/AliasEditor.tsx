@@ -1,10 +1,10 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { parseAliasEditor, type AliasInput } from "@/lib/guardState.ts";
+import { parseAliasEditor, type AliasInput, type AliasLine } from "@/lib/guardState.ts";
 
 export interface AliasEditorProps {
-  aliases: { alias: string; onChain: string | null }[];
+  aliases: AliasLine[];
   running: boolean;
   onSave: (entries: AliasInput[]) => void;
 }
@@ -38,9 +38,13 @@ export function AliasEditor({ aliases, running, onSave }: AliasEditorProps) {
         {aliases.map((entry) => (
           <li key={entry.alias} className="flex justify-between gap-3">
             <span>{entry.alias}</span>
-            <span className="selectable font-mono text-polaris-muted">
-              {entry.onChain ? short(entry.onChain) : "not on chain"}
-            </span>
+            {entry.status === "error" ? (
+              <span className="text-polaris-danger">read failed</span>
+            ) : entry.onChain ? (
+              <span className="selectable font-mono text-polaris-muted">{short(entry.onChain)}</span>
+            ) : (
+              <span className="text-polaris-muted">not on chain</span>
+            )}
           </li>
         ))}
         {aliases.length === 0 ? <li className="text-polaris-muted">No aliases configured.</li> : null}

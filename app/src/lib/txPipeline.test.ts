@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { Account, Asset, Keypair, Operation, Transaction, TransactionBuilder } from "@stellar/stellar-sdk";
+import { setSequence } from "@polaris/stellar";
 import { xdrDigest, type ApprovalRequest } from "@polaris/agent";
 import type { ChainToolResult, Intent } from "@polaris/interfaces";
 
@@ -37,6 +39,7 @@ function deps(overrides: Partial<TxPipelineDeps> = {}): TxPipelineDeps {
     approver: { async approve() { return APPROVED; } },
     sign: async () => submitted(),
     now: () => 1_000,
+    resequence: async (result) => result,
     ...overrides,
   };
 }
@@ -201,4 +204,111 @@ test("runTxSequence returns one submitted outcome per step when all succeed", as
   const outcomes = await runTxSequence([step("A"), step("B")], deps());
   assert.equal(outcomes.length, 2);
   assert.ok(outcomes.every((outcome) => outcome.status === "submitted"));
+});
+
+// ── sequences (B1: a plan must not submit a stale sequence) ──────────────────
+
+const PASSPHRASE = "Test SDF Network ; September 2015";
+const SOURCE = Keypair.random().publicKey();
+
+/** A real unsigned payment envelope at an explicit account sequence. */
+function xdrAt(sequence: string): string {
+  const account = new Account(SOURCE, sequence);
+  return new TransactionBuilder(account, { fee: "100", networkPassphrase: PASSPHRASE })
+    .addOperation(
+      Operation.payment({ destination: Keypair.random().publicKey(), asset: Asset.native(), amount: "1" }),
+    )
+    .setTimeout(30)
+    .build()
+    .toXDR();
+}
+
+/** The sequence number embedded in a real envelope. */
+function sequenceOf(xdr: string): bigint {
+  const tx = TransactionBuilder.fromXDR(xdr, PASSPHRASE);
+  assert.ok(tx instanceof Transaction);
+  return BigInt(tx.sequence);
+}
+
+test("runTxSequence resequences each step against the source's current sequence", async () => {
+  const shared = xdrAt("100");
+  const steps: TxRunStep[] = ["A", "B", "C"].map((label) => ({
+    result: { unsignedXdr: shared, summary: { title: label, lines: [], estimatedFee: "0.00001 XLM" } },
+    intent: INTENT,
+    label,
+  }));
+  const submittedSequences: bigint[] = [];
+  const approved: bigint[] = [];
+  let current = 100n;
+  const d = deps({
+    // Mirrors `resequenceEnvelope`: load the current account sequence, set `current+1`.
+    resequence: async (result) => {
+      current += 1n;
+      return { ...result, unsignedXdr: setSequence(result.unsignedXdr, PASSPHRASE, current) };
+    },
+    approver: {
+      async approve(request) {
+        approved.push(sequenceOf(request.unsignedXdr));
+        return APPROVED;
+      },
+    },
+    sign: async (outcome) => {
+      submittedSequences.push(sequenceOf(outcome.result!.unsignedXdr));
+      return submitted();
+    },
+  });
+
+  const outcomes = await runTxSequence(steps, d);
+
+  assert.equal(outcomes.length, 3);
+  assert.ok(outcomes.every((outcome) => outcome.status === "submitted"));
+  assert.deepEqual(submittedSequences, [101n, 102n, 103n]);
+  assert.deepEqual(approved, [101n, 102n, 103n]);
+});
+
+test("a resequencing failure is labelled and never reaches the signer", async () => {
+  let signed = 0;
+  const d = deps({
+    resequence: async () => {
+      throw new Error("rpc unreachable");
+    },
+    sign: async () => {
+      signed += 1;
+      return submitted();
+    },
+    now: () => 9,
+  });
+
+  const outcomes = await runTxSequence([step("A"), step("B")], d);
+
+  assert.deepEqual(outcomes, [
+    { status: "failed", label: "A", detail: "Resequencing error: rpc unreachable", atMs: 9 },
+  ]);
+  assert.equal(signed, 0);
+});
+
+test("a step's lazy build() is preferred over its plan-time result", async () => {
+  let built = 0;
+  const seenXdr: string[] = [];
+  const fresh = { unsignedXdr: `${UNSIGNED}-fresh`, summary: { title: "A", lines: [], estimatedFee: "0.00001 XLM" } };
+  const stepA: TxRunStep = {
+    result: RESULT,
+    intent: INTENT,
+    label: "A",
+    build: async () => {
+      built += 1;
+      return fresh;
+    },
+  };
+  const d = deps({
+    sign: async (outcome) => {
+      seenXdr.push(outcome.result!.unsignedXdr);
+      return submitted();
+    },
+  });
+
+  await runTxSequence([stepA], d);
+
+  assert.equal(built, 1);
+  assert.deepEqual(seenXdr, [fresh.unsignedXdr]);
 });

@@ -58,6 +58,14 @@ export interface TxPipelineDeps {
   sign: (outcome: ExecutionOutcome) => Promise<SubmittedOutcome>;
   /** Injectable clock; outcome timestamps come from here so tests are deterministic. */
   now: () => number;
+  /**
+   * Gives a step's transaction its source account's **current** next sequence
+   * number before it is approved, returning a result whose summary reflects the
+   * resequenced XDR (the tx hash, and therefore the explorer link, changes).
+   * Production default parses the source, loads it over Soroban RPC and reuses
+   * `resequenceEnvelope` from `@polaris/stellar`; tests inject a fake.
+   */
+  resequence: (result: ChainToolResult) => Promise<ChainToolResult>;
 }
 
 /**
@@ -76,15 +84,51 @@ function defaultTxDeps(): Promise<TxPipelineDeps> {
       approver,
       sign: (outcome) => signAndSubmit(outcome, defaultSigningDeps),
       now: () => Date.now(),
+      resequence: defaultResequence,
     };
   })();
   return defaultsPromise;
 }
 
+/** Point an explorer link at a new tx hash (resequencing changes the hash). */
+function rewriteExplorerUrl(url: string | undefined, hash: string): string | undefined {
+  if (!url) return undefined;
+  const marker = "/tx/";
+  const at = url.lastIndexOf(marker);
+  return at >= 0 ? `${url.slice(0, at + marker.length)}${hash}` : url;
+}
+
+/**
+ * The production resequencer: load each step's source over Soroban RPC and reuse
+ * `resequenceEnvelope` so a multi-step plan submits as `base+n`. The summary's
+ * explorer link is recomputed from the resequenced XDR's real tx hash; every
+ * other summary field is sequence-independent and kept verbatim.
+ */
+async function defaultResequence(result: ChainToolResult): Promise<ChainToolResult> {
+  const [{ getStellarConfig }, sdk, stellar] = await Promise.all([
+    import("@/lib/stellarConfig"),
+    import("@stellar/stellar-sdk"),
+    import("@polaris/stellar"),
+  ]);
+  const config = await getStellarConfig();
+  const tx = sdk.TransactionBuilder.fromXDR(result.unsignedXdr, config.networkPassphrase);
+  if (!(tx instanceof sdk.Transaction)) throw new Error("fee-bump envelopes are not supported");
+  const server = new sdk.rpc.Server(config.rpcUrl);
+  const unsignedXdr = await stellar.resequenceEnvelope(
+    result.unsignedXdr,
+    config.networkPassphrase,
+    tx.source,
+    (address) => server.getAccount(address),
+  );
+  const fresh = sdk.TransactionBuilder.fromXDR(unsignedXdr, config.networkPassphrase);
+  const explorerUrl = rewriteExplorerUrl(result.summary.explorerUrl, stellar.guard.toHex(fresh.hash()));
+  return { unsignedXdr, summary: { ...result.summary, ...(explorerUrl ? { explorerUrl } : {}) } };
+}
+
 /** Merges the injected fakes over the lazily built real seams. */
 async function resolveDeps(deps?: Partial<TxPipelineDeps>): Promise<TxPipelineDeps> {
-  if (deps?.approver && deps.sign && deps.now) {
-    return { approver: deps.approver, sign: deps.sign, now: deps.now };
+  if (deps?.approver && deps.sign && deps.now && deps.resequence) {
+    return { approver: deps.approver, sign: deps.sign, now: deps.now, resequence: deps.resequence };
   }
   return { ...(await defaultTxDeps()), ...deps };
 }
@@ -199,6 +243,12 @@ export interface TxRunStep {
   result: ChainToolResult;
   intent: Intent;
   label: string;
+  /**
+   * Optional lazy builder, preferred when present: it is called right before the
+   * step is approved so a fresh `ChainToolResult` (current state, current
+   * sequence) can replace the plan-time one. The pipeline resequences either way.
+   */
+  build?: () => Promise<ChainToolResult>;
 }
 
 /** The phase a progress callback reports for a step. */
@@ -209,20 +259,48 @@ export type TxProgress = (index: number, total: number, label: string, phase: Tx
 
 /**
  * Runs steps strictly in order and stops at the first non-submitted outcome, so
- * a multi-transaction panel flow cannot race or continue past a denial. Returns
- * the outcomes produced (at most one per step, from the start to the stop).
+ * a multi-transaction panel flow cannot race or continue past a denial.
+ *
+ * Every step is resequenced against its source account's **current** on-chain
+ * sequence immediately before it is approved (not when the plan was built), so a
+ * plan whose steps all embed the same base sequence submits as `base+1`,
+ * `base+2`, … instead of failing `txBadSeq` after the first. The approval digest
+ * and the displayed summary are computed from the resequenced XDR. A resequencing
+ * failure is a labelled failure and the stale XDR is never approved or signed.
+ * Returns the outcomes produced (at most one per step, from the start to the stop).
  */
 export async function runTxSequence(
   steps: readonly TxRunStep[],
   deps?: Partial<TxPipelineDeps>,
   onProgress?: TxProgress,
 ): Promise<TxRunOutcome[]> {
+  let resolved: TxPipelineDeps;
+  try {
+    resolved = await resolveDeps(deps);
+  } catch (error) {
+    return [{ status: "failed", label: "Approval unavailable", detail: detailOf(error), atMs: Date.now() }];
+  }
+
   const outcomes: TxRunOutcome[] = [];
   const total = steps.length;
   for (let index = 0; index < total; index++) {
     const step = steps[index]!;
+    let result: ChainToolResult;
+    try {
+      const built = step.build ? await step.build() : step.result;
+      result = await resolved.resequence(built);
+    } catch (error) {
+      onProgress?.(index, total, step.label, "failed");
+      outcomes.push({
+        status: "failed",
+        label: step.label,
+        detail: `Resequencing error: ${detailOf(error)}`,
+        atMs: resolved.now(),
+      });
+      break;
+    }
     onProgress?.(index, total, step.label, "approving");
-    const outcome = await runTx(step.result, { intent: step.intent, label: step.label }, deps);
+    const outcome = await runWith(result, { intent: step.intent, label: step.label }, resolved);
     outcomes.push(outcome);
     onProgress?.(index, total, step.label, outcome.status);
     if (outcome.status !== "submitted") break;

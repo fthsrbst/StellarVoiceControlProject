@@ -34,6 +34,7 @@ import {
   validateLimits,
   validateRuleFields,
   type AliasInput,
+  type AliasLine,
   type LimitsFields,
   type PlanStep,
   type PlanStepKind,
@@ -71,14 +72,17 @@ async function readAliases(
   client: guard.GuardClient,
   owner: string,
   envAliases: Record<string, string>,
-): Promise<{ alias: string; onChain: string | null }[]> {
+): Promise<AliasLine[]> {
   const names = [...new Set([...Object.keys(committedAliases), ...Object.keys(envAliases)])].sort();
   return Promise.all(
-    names.map(async (alias) => {
+    names.map(async (alias): Promise<AliasLine> => {
       try {
-        return { alias, onChain: await client.getAlias(owner, alias) };
+        const onChain = await client.getAlias(owner, alias);
+        return onChain
+          ? { alias, onChain, status: "ok" }
+          : { alias, onChain: null, status: "missing" };
       } catch {
-        return { alias, onChain: null };
+        return { alias, onChain: null, status: "error" };
       }
     }),
   );
@@ -188,7 +192,7 @@ export async function planEnable(
     steps: toPlanSteps(built.steps, state, fields),
     readBack: readBackEnable(validation.draft, state.assetSymbol),
     order: [...ENABLE_STEP_ORDER],
-    note: "3 owner signatures, 1 approval card + Touch ID. Step 3 arms unattended payments.",
+    note: "3 owner signatures, one approval card + Touch ID per step (3). Step 3 arms unattended payments.",
   };
 }
 
@@ -217,10 +221,10 @@ export async function planBaseline(fields: LimitsFields, state: SecurityState): 
   const kinds = built.steps.map((step) => step.kind);
   if (!matchesOrder(kinds, BASELINE_STEP_ORDER)) throw new Error("unexpected baseline step order");
   return {
-    steps: toPlanSteps(built.steps, state, fields),
+    steps: toPlanSteps(built.steps, state, { ...fields, threshold: "0" }),
     readBack: readBackBaseline(fields, state.assetSymbol),
     order: [...BASELINE_STEP_ORDER],
-    note: "Allowance + rule, no executor: every payment still needs your approval.",
+    note: "2 owner signatures, one approval card + Touch ID per step (2). No executor: every payment still needs approval.",
   };
 }
 
