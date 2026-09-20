@@ -9,6 +9,7 @@
 mod agent;
 mod approval;
 mod biometric;
+mod bridge;
 mod capture;
 mod commands;
 mod env;
@@ -66,6 +67,9 @@ pub fn run() {
             health::biometric_selftest,
             voice_health::voice_health,
             tx_events::tx_submitted_emit,
+            bridge::commands::bridge_sign,
+            bridge::commands::bridge_selftest,
+            bridge::commands::bridge_health,
         ])
         // Step W0: a panel's close button hides it instead of quitting the app
         // (the overlay's `main` window is never closed, so the close handler is
@@ -106,6 +110,11 @@ pub fn run() {
             // is used only in tests).
             app.manage(approval::ApprovalStore::new());
             app.manage(biometric::system());
+
+            // Step W4b: the browser launcher for the Freighter signing bridge.
+            // Managed as a trait object so tests can install a fake and never
+            // open a real browser.
+            app.manage(bridge::commands::system_launcher());
 
             // Registers the Control+Option monitor and the Control+Option+Space
             // fallback; both feed the same capture latch.

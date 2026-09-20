@@ -224,6 +224,56 @@ The page and the W4b server must stay in lockstep; change one, change the other.
 
 ---
 
+## 6b. Implementation notes (W4b-1)
+
+The Rust half lives in `app/src-tauri/src/bridge/`:
+
+- `mod.rs` — module overview and the three exported commands.
+- `server.rs` — the one-shot `tiny_http` session, the payload/result endpoints,
+  the static asset provider and `bridge_health`.
+- `verify.rs` — parse-free XDR verification and the transaction hash.
+- `strkey.rs` — `G...` StrKey decoding (base32 + version byte + CRC16-XModem).
+- `launch.rs` — macOS `open` (no shell) and `POLARIS_BRIDGE_BROWSER`.
+- `commands.rs` — `bridge_sign`, `bridge_selftest`, `bridge_health`.
+
+**Server.** `SigningSession::start` binds `127.0.0.1:0`, mints a 32-byte token
+from the OS CSPRNG, and serves on one blocking thread. Every request is checked
+against the session's own origin: `Host` must equal `127.0.0.1:<port>` and
+`Origin` must be absent or that same origin (DNS-rebinding guard). Only
+`GET /sign/payload`, `POST /sign/result` and static `GET` are served; anything
+else is `404`. `POST` requires `Content-Type: application/json`, a body at most
+64 KiB, and the token compared in constant time. The first accepted result wins
+and a second post is `410` even after the waiter has read the outcome. Every
+response carries `Cache-Control: no-store` and `Referrer-Policy: no-referrer`;
+static responses also carry the restrictive CSP. No CORS header is ever emitted.
+
+**Browser.** macOS `open` is used directly with the URL as a single argument.
+`POLARIS_BRIDGE_BROWSER` (an application name such as `Google Chrome`, validated
+against a conservative charset) selects `open -a "<name>" <url>`; leave it unset
+for the default browser. Freighter must be installed in whichever browser opens.
+
+**Verification.** Rust never trusts the page's own checks. A v1
+`TransactionEnvelope` with an empty signature list is
+`[00000002][Transaction body…][00000000]`, so the body is a byte slice and the
+source key / fee / sequence sit at fixed offsets. The transaction hash is
+`SHA-256(SHA-256(networkPassphrase) || 00000002 || body)` — pinned to the JS SDK
+by a test vector — and a signed envelope must equal
+`unsigned[..len-4] || 00000001 || hint(4) || 00000040 || signature(64)` with the
+same body bytes, signed by the owner's key. Any deviation is `integrity`.
+
+**Self-test safety.** `bridge_selftest` bypasses the approval gate, so it refuses
+any envelope whose source is not the configured owner **and** any envelope whose
+sequence number is not exactly `0`. A sequence-0 transaction can never be applied
+on-chain, so the self-test cannot be used to sign a real transaction.
+
+**Dev build.** The static assets come from the Tauri asset resolver (embedded
+`app/dist`). When the resolver has no file (a dev build that did not bundle the
+frontend), the server falls back to `app/dist` on disk; when that is absent too,
+it answers `404` with the message to run `npm run build -w @polaris/app`.
+
+**Not verified by the automated checks** (needs a human): opening a real browser
+and completing a real Freighter round trip.
+
 ## 7. Known limits
 
 - **Real Freighter signing is not verified by W4a's automated checks.** That

@@ -89,7 +89,10 @@ fn crc16_xmodem(data: &[u8]) -> u16 {
 /// and a valid CRC16-XModem checksum (m-6). Shape-only validation would accept a
 /// single-character typo that keeps the charset, deferring the failure to a
 /// Horizon `loadAccount`; the checksum catches it here (fail-closed).
-fn is_public_key(value: &str) -> bool {
+///
+/// `pub(crate)` because the bridge (W4b) uses the same validation for the owner
+/// address in its health check.
+pub(crate) fn is_public_key(value: &str) -> bool {
     if value.len() != 56 {
         return false;
     }

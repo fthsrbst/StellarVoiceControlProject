@@ -166,6 +166,7 @@
 ### Signing bridge
 - [x] (2026-09-20, branch `feat/w4a-freighter-bridge-page`, pending PR) **W4a.** Freighter signing bridge page (Stellar Wallets Kit): second Vite `/sign` entry, pure state machine, fail-closed address/network checks, signed-vs-unsigned hash binding, local fixture + tests, protocol docs (review fixes 2 applied; live Freighter still needs a human)
 - [ ] (2026-09-20, branch `feat/w4b-wiring`, pending PR + W4b-1) **W4b-2.** TS wiring: Touch ID approver (`approval_begin`→open card→authorized/denied/expired/timeout, fail-closed), `bridge_sign`→`submitSignedTx`→`tx_submitted` with hash-equality check, enriched outcome + tr/en spoken result, Rust `tx_submitted_emit` command + validation, W4 Debug checks (`network`/`approval`/`bridge`/`submit`) — see `backlog/w4b-wiring.md`
+- [x] (2026-09-20, branch `feat/w4b-bridge-server`) **W4b-1 (Rust).** Localhost signing-session server (`tiny_http`, one-time token, TTL, constant-time compare), `bridge_sign`/`bridge_selftest`/`bridge_health` commands, parse-free XDR verification + StrKey decode, browser launch, debug contract FeatureCheck; 44 bridge unit tests. Real browser + Freighter round trip still needs a human
 
 ## Milestone 3 — Chain & Guard 🔲
 - [x] polaris_guard Soroban contract: per-tx/daily spending limit + alias book; deployed on testnet, contract ID documented (2026-09-19, PR #10 + keeper PR #9)
