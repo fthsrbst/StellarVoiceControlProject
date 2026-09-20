@@ -80,6 +80,8 @@
 > multi-block/UTF-8 vectors added. All suites/clippy green. See the Review fixes section in
 > `backlog/w1-network-wiring.md`.
 
+> 2026-09-20 — **T1 settings / env / Makefile** (`feat/t1-settings-env`): read-only Settings panel (`voice_health` + `stellar_config` rows with status badges, redacted Copy diagnostics) + `settings` Debug check; `.env` falls back to `~/Library/Application Support/Polaris/.env`; `make build` uses the local Tauri CLI and `make run` launches the bundle from the repo root; all checks/tests/build/clippy green — `backlog/t1-settings-env.md`.
+
 #### A0 — Push-to-talk + notch overlay harness ✅
 > Design pivot (2026-09-19): the dashboard/log-pane harness was replaced by the notch
 > overlay from the design reference (`notch-design.md`: "Replace the A0 dashboard"). The

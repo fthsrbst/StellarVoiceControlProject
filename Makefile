@@ -7,8 +7,9 @@ SHELL := /bin/bash
 
 APP_MANIFEST := app/src-tauri/Cargo.toml
 CHAIN_MANIFEST := contracts/Cargo.toml
+APP_BIN := app/src-tauri/target/release/bundle/macos/Polaris.app/Contents/MacOS/polaris-app
 
-.PHONY: help setup icons check check-chain check-contracts dev agent build build-contracts contracts-test clean
+.PHONY: help setup icons check check-chain check-contracts dev agent build run build-contracts contracts-test clean
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -34,8 +35,12 @@ dev: ## Run the desktop shell (Tauri dev, Vite HMR)
 agent: ## Run the agent skeleton smoke test
 	npm run start -w @polaris/agent
 
-build: ## Bundle the macOS app (release)
-	cd app && caffeinate -i cargo tauri build
+build: ## Bundle the macOS app (release) using the local Tauri CLI
+	cd app && PATH="$$HOME/.cargo/bin:$$PATH" caffeinate -i npm run tauri:build
+
+run: ## Launch the built app from the repo root so the repo-root .env is found
+	@test -x "$(APP_BIN)" || { echo "No build yet — run 'make build' first."; exit 1; }
+	"$(APP_BIN)"
 
 build-contracts: ## Build polaris_guard to wasm (requires stellar-cli >= 25.2.0)
 	caffeinate -i stellar contract build --manifest-path $(CHAIN_MANIFEST)
