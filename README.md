@@ -1,8 +1,8 @@
-# Polaris
+# Autonomy
 
 > **Project link (live demo):** _to be added_ <!-- TODO: replace this line with the public project/demo URL before submission -->
 
-Polaris is a **push-to-talk voice assistant for Stellar that lives in the MacBook notch.** Hold `Control+Option`, speak Turkish or English, and Polaris answers — or turns the request into a real Stellar transaction: a payment, a spending rule, a scheduled transfer, a bank on/off-ramp, or a peer-to-peer trade. Every value-moving step is rendered as a decoded transaction card and gated by Touch ID; anything that runs unattended is bounded by an on-chain Soroban guard.
+Autonomy is a **push-to-talk voice assistant for Stellar that lives in the MacBook notch.** Hold `Control+Option`, speak Turkish or English, and Autonomy answers — or turns the request into a real Stellar transaction: a payment, a spending rule, a scheduled transfer, a bank on/off-ramp, or a peer-to-peer trade. Every value-moving step is rendered as a decoded transaction card and gated by Touch ID; anything that runs unattended is bounded by an on-chain Soroban guard.
 
 **Stellar Testnet only — no mainnet, no real money.**
 
@@ -16,24 +16,24 @@ Polaris is a **push-to-talk voice assistant for Stellar that lives in the MacBoo
 
 ---
 
-## Narrative: why Polaris
+## Narrative: why Autonomy
 
 ### The problem
 Moving stablecoins still means opening a browser wallet, copying a 56-character address and approving a signature prompt most people cannot read. Voice is the natural interface for "send 10 to Ahmet" — but giving an LLM unsupervised control of money is unacceptable. Users need **voice-level speed with human-level control.**
 
 ### Target users
 - Stablecoin users who want hands-free payments without handing custody to a web app or a bot.
-- Turkish users in particular: Polaris understands code-switched Turkish/English commands ("Ahmet'e 10 dolar gönder") and supports a TRY leg through a peer-to-peer escrow.
+- Turkish users in particular: Autonomy understands code-switched Turkish/English commands ("Ahmet'e 10 dolar gönder") and supports a TRY leg through a peer-to-peer escrow.
 - Builders looking for a reference implementation of **safe agentic payments** on Stellar: the approval model, the failure modes and the on-chain enforcement are all in this repo.
 
 ### Why this problem is worth solving
-The UX gap — not liquidity or speed — is what keeps stablecoins out of everyday use. Letting an agent act on the user's behalf makes the gap worse: an agent must be powerful enough to be useful and constrained enough to be safe. Polaris demonstrates one concrete answer: **the model proposes, the user disposes, and the chain bounds what runs unattended.**
+The UX gap — not liquidity or speed — is what keeps stablecoins out of everyday use. Letting an agent act on the user's behalf makes the gap worse: an agent must be powerful enough to be useful and constrained enough to be safe. Autonomy demonstrates one concrete answer: **the model proposes, the user disposes, and the chain bounds what runs unattended.**
 
 ### Value proposition
 - **Voice-first Stellar.** Speak; get a decoded transaction card, not a hex blob.
 - **Touch ID + embedded wallet.** No browser extension and no web page holding keys: the seed lives in the macOS Keychain and signing happens inside the app.
 - **On-chain spending rules.** A non-upgradeable Soroban contract enforces per-transaction, daily and recipient limits for unattended payments; revoking one token allowance is the kill switch.
-- **Local by default.** Transcripts, the wallet and the agent configuration stay on the device; Polaris has no account and no backend.
+- **Local by default.** Transcripts, the wallet and the agent configuration stay on the device; Autonomy has no account and no backend.
 
 ---
 
@@ -48,7 +48,7 @@ A native **macOS app** (Tauri v2: trusted Rust core + React/TypeScript webview) 
 - **Notch pages:** History, Tasks, Rules, Wallet, Trade, Settings — all voice-navigable.
 - **Chain lane** (`@polaris/stellar`): payments, guard client, schedules + keeper, SDF anchor client (SEP-6), P2P client, and live testnet E2E tooling.
 
-Polaris is a desktop application, so there is no hosted web front-end URL. The project link at the top of this README is the submission entry point for the demo; the timed scene-by-scene script is [`docs/demo-script.md`](docs/demo-script.md). The on-chain half of the MVP can also be verified headlessly from this repository — see **Headless proof** below.
+Autonomy is a desktop application, so there is no hosted web front-end URL. The project link at the top of this README is the submission entry point for the demo; the timed scene-by-scene script is [`docs/demo-script.md`](docs/demo-script.md). The on-chain half of the MVP can also be verified headlessly from this repository — see **Headless proof** below.
 
 ### Deployed contracts (Stellar Testnet)
 
@@ -114,7 +114,7 @@ Run it from source:
 
 ```bash
 make setup    # npm install + .env from .env.example + icons
-make build    # builds Polaris.app (macOS, Apple silicon)
+make build    # builds Autonomy.app (macOS, Apple silicon)
 make run      # launches it (from the repo root so .env is found)
 # or: make dev   — Tauri dev mode with Vite HMR
 ```
@@ -189,7 +189,7 @@ The typed seam between the layers is `@polaris/interfaces` (`interfaces/src/inde
 5. **Approval.** The notch shows a card rendered from the **decoded XDR** (recipient, asset, amount, fees). The default approver is deny-all. Touch ID (LAContext, device-owner auth) authorizes the exact XDR digest.
 6. **Sign + submit.** The embedded wallet signs in Rust inside the unlocked session; the signed envelope is re-verified before submission via Soroban RPC / Horizon. `tx_submitted` events update the notch, and History records the turn.
 7. **Read-back.** A short confirmation sentence (capped at 120 characters for latency) is spoken via Fish Audio with a local macOS `say` fallback.
-8. **Autonomous path (opt-in).** A spoken rule arms one batch card (`approve → set_rule → set_executor`); within limits the registered executor key settles payments unattended via `pay_executor`, bounded on-chain by `polaris_guard`. Above the limit the chain returns `#105` and Polaris falls back to the owner approval card.
+8. **Autonomous path (opt-in).** A spoken rule arms one batch card (`approve → set_rule → set_executor`); within limits the registered executor key settles payments unattended via `pay_executor`, bounded on-chain by `polaris_guard`. Above the limit the chain returns `#105` and Autonomy falls back to the owner approval card.
 
 ### Stellar integrations and protocols
 
