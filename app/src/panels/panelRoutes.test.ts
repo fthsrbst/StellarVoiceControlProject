@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { isPanelName, parsePanelRoute } from "./panelRoutes.ts";
+import { isPanelName, parseApprovalDemo, parsePanelRoute } from "./panelRoutes.ts";
 
 test("the no-hash window is the notch overlay", () => {
   assert.deepEqual(parsePanelRoute(""), { kind: "notch" });
@@ -34,6 +34,28 @@ test("an unknown hash falls back to the notch, never a blank window", () => {
   assert.deepEqual(parsePanelRoute("#/bogus"), { kind: "notch" });
   assert.deepEqual(parsePanelRoute("#/wallet/extra"), { kind: "notch" });
   assert.deepEqual(parsePanelRoute("nonsense"), { kind: "notch" });
+});
+
+test("the approval demo query parses only for the approval panel", () => {
+  assert.equal(parseApprovalDemo("#/approval?demo=1"), "live");
+  assert.equal(parseApprovalDemo("#/approval?demo=true"), "live");
+  assert.equal(parseApprovalDemo("#/approval?demo"), "live");
+  assert.equal(parseApprovalDemo("#/approval?demo=expired"), "expired");
+  assert.equal(parseApprovalDemo("#/approval?demo=error"), "error");
+  // Case is tolerated on the value.
+  assert.equal(parseApprovalDemo("#/approval?demo=EXPIRED"), "expired");
+});
+
+test("no demo value — or one on another panel — stays real mode", () => {
+  assert.equal(parseApprovalDemo("#/approval"), null);
+  assert.equal(parseApprovalDemo("#/approval?tab=history"), null);
+  assert.equal(parseApprovalDemo("#/wallet?demo=1"), null);
+  assert.equal(parseApprovalDemo(""), null);
+});
+
+test("an unknown demo value falls back to real mode", () => {
+  assert.equal(parseApprovalDemo("#/approval?demo=bogus"), null);
+  assert.equal(parseApprovalDemo("#/approval?demo=0"), null);
 });
 
 test("isPanelName accepts only the registry names", () => {

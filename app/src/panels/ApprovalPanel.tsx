@@ -1,54 +1,131 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 import type { PolarisEvent } from "@polaris/interfaces";
 
+import { createApprovalCommands, toApprovalError, type ApprovalCommands } from "@/lib/approval";
+import {
+  canApprove,
+  currentSnapshot,
+  initialApprovalState,
+  reduceApproval,
+  remainingMs,
+  type ApprovalFlowState,
+} from "@/panels/approval/approvalFlow";
+import { ApprovalCard } from "@/panels/approval/ApprovalCard";
+import { createDemoCommands } from "@/panels/approval/demo";
 import { usePolarisEvents } from "@/panels/events";
-import { PanelNote, PanelShell } from "@/panels/PanelShell";
+import { parseApprovalDemo } from "@/panels/panelRoutes";
+import { PanelShell } from "@/panels/PanelShell";
 
-/** The `summary` an `approval_request` event carries, decoded from the unsigned XDR. */
-type ApprovalSummary = Extract<PolarisEvent, { type: "approval_request" }>["summary"];
+/** The card's live error, if the current stage is `error`. */
+function errorOf(state: ApprovalFlowState) {
+  return state.stage === "error" ? state.error : null;
+}
+
+/** The non-alarming hint attached to the current stage, if any. */
+function hintOf(state: ApprovalFlowState): string | null {
+  return state.stage === "pending" ? state.hint : null;
+}
 
 /**
- * Approval panel skeleton.
+ * Approval card window.
  *
- * It mirrors the latest `approval_request` for context only. The Approve / Deny
- * actions and the Touch ID gate that authorises them arrive with the signing
- * milestone — nothing here may move value or bypass the approval events, so the
- * card is deliberately presentation-only.
+ * The Rust gate (W3) owns the pending-approval store and Touch ID; this panel is
+ * its typed webview face. Because the window can open *after* `approval_request`
+ * was emitted, it hydrates from `approval_current()` on mount and re-reads on
+ * every `approval_request` / `approval_result` event, rather than trusting a
+ * single event it may have missed. Demo mode (`#/approval?demo=…`) swaps in
+ * fixture commands and shows a mandatory banner; real mode never uses a fixture.
  */
 export function ApprovalPanel() {
-  const [summary, setSummary] = useState<ApprovalSummary | null>(null);
+  const demo = useMemo(() => parseApprovalDemo(window.location.hash), []);
+  const commands: ApprovalCommands = useMemo(
+    () => (demo === null ? createApprovalCommands() : createDemoCommands(demo)),
+    [demo],
+  );
 
-  const onEvent = useCallback((event: PolarisEvent) => {
-    if (event.type === "approval_request") setSummary(event.summary);
-  }, []);
+  const [state, dispatch] = useReducer(reduceApproval, undefined, initialApprovalState);
+  // Readable from the async callbacks below without re-subscribing them.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  const refresh = useCallback(() => {
+    commands
+      .current()
+      .then((snapshot) => dispatch({ type: "snapshot", snapshot, nowMs: Date.now() }))
+      .catch((error: unknown) => dispatch({ type: "snapshotFailed", error: toApprovalError(error) }));
+  }, [commands]);
+
+  // Subscribe first, then read the snapshot, so a request that lands between the
+  // two is not missed (the same ordering the notch overlay uses).
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const onEvent = useCallback(
+    (event: PolarisEvent) => {
+      if (event.type === "approval_request") {
+        refresh();
+      } else if (event.type === "approval_result") {
+        // Apply the result for the request we are showing, then re-read to
+        // reconcile against the store (and ignore a different payloadHash).
+        dispatch({ type: "result", payloadHash: event.payloadHash, approved: event.approved });
+        refresh();
+      }
+    },
+    [refresh],
+  );
   usePolarisEvents(onEvent);
 
+  // The countdown is the only timer; it runs while the request is still live.
+  useEffect(() => {
+    if (state.stage !== "pending" && state.stage !== "authorizing") return;
+    const timer = setInterval(() => dispatch({ type: "tick", nowMs: Date.now() }), 1_000);
+    return () => clearInterval(timer);
+  }, [state.stage]);
+
+  const onApprove = useCallback(() => {
+    const current = stateRef.current;
+    if (!canApprove(current)) return;
+    const snapshot = currentSnapshot(current);
+    if (snapshot === null) return;
+    dispatch({ type: "approveClicked" });
+    commands
+      .authorize(snapshot.id)
+      .then((next) => dispatch({ type: "authorizeOk", snapshot: next }))
+      .catch((error: unknown) => {
+        const failure = toApprovalError(error);
+        dispatch({ type: "authorizeFailed", kind: failure.kind, message: failure.message });
+      });
+  }, [commands]);
+
+  const onDeny = useCallback(() => {
+    const current = stateRef.current;
+    const snapshot = currentSnapshot(current);
+    if (snapshot === null) return;
+    if (current.stage !== "pending" && current.stage !== "authorizing") return;
+    dispatch({ type: "denyClicked" });
+    commands
+      .deny(snapshot.id)
+      .then((next) => dispatch({ type: "snapshot", snapshot: next, nowMs: Date.now() }))
+      .catch(() => refresh());
+  }, [commands, refresh]);
+
   return (
-    <PanelShell title="Approval" subtitle="Review the exact transaction before it is signed">
-      <div className="space-y-4">
-        <PanelNote>
-          Approve / Deny and the Touch ID gate land in milestone W3. This card is
-          read-only: it never signs, submits or approves anything, and it stays on
-          the approval event stream rather than calling the chain directly.
-        </PanelNote>
-        {summary ? (
-          <div className="space-y-2 rounded-lg border border-polaris-line bg-polaris-panel/60 p-3">
-            <p className="text-sm font-medium">{summary.title}</p>
-            <ul className="space-y-1 text-xs text-polaris-muted">
-              {summary.lines.map((line) => (
-                <li key={line} className="selectable">
-                  {line}
-                </li>
-              ))}
-            </ul>
-            <p className="text-xs text-polaris-muted">
-              Estimated fee: <span className="selectable">{summary.estimatedFee}</span>
-            </p>
-          </div>
-        ) : (
-          <p className="text-xs text-polaris-muted">No pending approval in this session.</p>
-        )}
-      </div>
+    <PanelShell
+      title="Approve transaction"
+      subtitle="Review the exact transaction before it is signed"
+    >
+      <ApprovalCard
+        stage={state.stage}
+        snapshot={currentSnapshot(state)}
+        remainingMs={remainingMs(state)}
+        hint={hintOf(state)}
+        error={errorOf(state)}
+        canApprove={canApprove(state)}
+        demo={demo !== null}
+        onApprove={onApprove}
+        onDeny={onDeny}
+      />
     </PanelShell>
   );
 }

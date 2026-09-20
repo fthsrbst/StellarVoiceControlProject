@@ -154,3 +154,43 @@ cargo clippy --manifest-path app/src-tauri/Cargo.toml -- -D warnings
   (`app_info`) is correct.
 - The unknown-name path: calling `open_panel` with a bad name returns the
   `unknownPanel` error rather than opening a window.
+
+## 8. Approval card (`#/approval`)
+
+> Step W2. The card is the webview face of the Rust Touch ID gate (W3). It never
+> signs: it renders the decoded summary, collects the gesture, and reflects what
+> the store reports.
+
+**Files.** Logic is split from presentation so the frontend owner can restyle it:
+`app/src/panels/approval/approvalFlow.ts` is a pure reducer (no React, no Tauri);
+`ApprovalCard.tsx` / `SummaryLines.tsx` / `HashFingerprint.tsx` are the view;
+`app/src/lib/approval.ts` is the typed command seam; `demo.ts` is the fixture
+command set.
+
+**States.** `idle → pending → authorizing → authorized | denied | expired`,
+plus a terminal `error`. Only `pending` (before `expiresAtMs`) enables Approve;
+`authorizing` locks it against a double click. Focus starts on **Deny**, Esc
+denies, and any unrecognised snapshot state fails closed into `error`.
+
+**Hydration.** The window can open after `approval_request` was emitted, so the
+panel calls `approval_current()` on mount and re-reads it on every
+`approval_request` / `approval_result` event. A result event for a different
+`payloadHash` is ignored.
+
+**Commands** (Tauri, camelCase args). None returns the XDR:
+
+- `approval_current() -> ApprovalSnapshot | null`
+- `approval_authorize(id) -> ApprovalSnapshot`
+- `approval_deny(id) -> ApprovalSnapshot`
+
+An `ApprovalSnapshot` is `{ id, payloadHash, summary, intent, mode, state,
+expiresAtMs }`, where `mode` is `touch_id | wallet_only` and `state` is
+`pending | authorized | denied | expired | consumed`. A rejected command rejects
+with `{ kind, message }`, `kind` ∈ `cancelled | failed | unavailable | timeout |
+expired | notPending`; a `cancelled` gesture returns the card to `pending` with a
+calm hint.
+
+**Demo URLs.** `#/approval?demo=1` (live, Approve simulates a 1 s Touch ID),
+`#/approval?demo=expired`, `#/approval?demo=error`. Demo mode swaps in fixture
+commands and shows a mandatory “DEMO — nothing is signed” banner; real mode
+(`#/approval` with no `demo`) never uses a fixture.
