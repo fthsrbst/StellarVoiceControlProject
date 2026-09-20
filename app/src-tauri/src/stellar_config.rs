@@ -46,6 +46,9 @@ pub struct StellarConfig {
     /// `GUARD_CONTRACT_ID`; a parameter, never a constant. `None` for an XLM
     /// direct payment, which needs no guard contract.
     pub guard_contract_id: Option<String>,
+    /// `POLARIS_P2P_CONTRACT_ID`; the deployed `polaris_p2p_escrow` id, or `None`
+    /// while the P2P milestone is unconfigured (the panel then stays disabled).
+    pub p2p_contract_id: Option<String>,
 }
 
 /// Decodes RFC 4648 base32 (`A-Z2-7`) without padding, or `None` on a bad char.
@@ -167,6 +170,7 @@ fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> StellarConfig {
             .map(|raw| parse_aliases(&raw))
             .unwrap_or_default(),
         guard_contract_id: lookup("GUARD_CONTRACT_ID"),
+        p2p_contract_id: lookup("POLARIS_P2P_CONTRACT_ID"),
     }
 }
 
@@ -208,6 +212,7 @@ mod tests {
         assert_eq!(config.owner_address, None);
         assert!(config.aliases.is_empty());
         assert_eq!(config.guard_contract_id, None);
+        assert_eq!(config.p2p_contract_id, None);
     }
 
     #[test]
@@ -220,6 +225,7 @@ mod tests {
             ("POLARIS_OWNER_ADDRESS", OWNER),
             ("POLARIS_ALIASES", &format!("acc2={ACC2}")),
             ("GUARD_CONTRACT_ID", "CDRLSFJ5WIC5UMF2LWPF3NRVDOKE7CN3DAYGKDWQ5TJJMVB7FRHRCK4D"),
+            ("POLARIS_P2P_CONTRACT_ID", "CBPTP2PZZPZZPZZPZZPZZPZZPZZPZZPZZPZZPZZPZZPZZPZZPZZPZZ"),
         ]);
         assert_eq!(config.rpc_url, "https://rpc.example");
         assert_eq!(config.horizon_url, "https://horizon.example");
@@ -228,6 +234,10 @@ mod tests {
         assert_eq!(
             config.guard_contract_id.as_deref(),
             Some("CDRLSFJ5WIC5UMF2LWPF3NRVDOKE7CN3DAYGKDWQ5TJJMVB7FRHRCK4D")
+        );
+        assert_eq!(
+            config.p2p_contract_id.as_deref(),
+            Some("CBPTP2PZZPZZPZZPZZPZZPZZPZZPZZPZZPZZPZZPZZPZZPZZPZZPZZ")
         );
     }
 
@@ -250,7 +260,7 @@ mod tests {
             .map(String::as_str)
             .collect();
         keys.sort_unstable();
-        // The exact wire key set: seven allow-listed fields, nothing else.
+        // The exact wire key set: eight allow-listed fields, nothing else.
         assert_eq!(
             keys,
             [
@@ -260,6 +270,7 @@ mod tests {
                 "network",
                 "networkPassphrase",
                 "ownerAddress",
+                "p2pContractId",
                 "rpcUrl",
             ]
         );
@@ -314,6 +325,7 @@ mod tests {
         assert!(json.contains(r#""ownerAddress":"GAJW"#));
         assert!(json.contains(r#""aliases":{"acc2":"GB25"#));
         assert!(json.contains(r#""guardContractId":null"#));
+        assert!(json.contains(r#""p2pContractId":null"#));
     }
 
     #[test]

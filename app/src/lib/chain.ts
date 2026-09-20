@@ -42,6 +42,13 @@ import {
 import type { Intent } from "@polaris/interfaces";
 
 import { getStellarConfig } from "@/lib/stellarConfig";
+import {
+  p2pAcceptTool,
+  p2pCancelTool,
+  p2pConfirmTool,
+  p2pOfferTool,
+  p2pReclaimTool,
+} from "@/lib/p2p";
 import { createTouchIdApprover, defaultApproverDeps, type ApproverDeps } from "@/lib/approver";
 import {
   defaultSigningDeps,
@@ -203,6 +210,13 @@ export async function executeApprovedIntent(
     withdraw: withdrawTry,
     schedule_payment: scheduleChainTool,
     cancel_schedule: cancelChainTool,
+    // P2P escrow (W8). The TRY leg stays off-chain; these only build the escrow
+    // calls and still go through the same approve → sign → submit pipeline.
+    p2p_offer: p2pOfferTool,
+    p2p_accept: p2pAcceptTool,
+    p2p_confirm: p2pConfirmTool,
+    p2p_cancel: p2pCancelTool,
+    p2p_reclaim: p2pReclaimTool,
   } as const;
   // F1: `deps.onStage` (when supplied) threads the turn's stage reports through
   // both the approval gate and the sign/submit path.

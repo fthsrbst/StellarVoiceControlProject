@@ -52,10 +52,14 @@ export { sendPayment } from "./payments/index.ts";
 export { payloadHashOf } from "./payments/index.ts";
 export {
   configurePayments,
+  defaultAssetRegistry,
   defaultPaymentDeps,
   parseAliasBook,
+  toSdkAsset,
   PaymentRefusal,
   type AliasBook,
+  type AssetRegistry,
+  type AssetSpec,
   type PaymentDeps,
 } from "./payments/index.ts";
 export const swap = todo("swap");
@@ -81,3 +85,8 @@ export * as schedule from "./schedule/index.ts";
 
 /** Deterministic, offline suggestions engine (T3). Pure: never applies a change (D11). */
 export * as suggest from "./suggest/index.ts";
+
+/** P2P escrow client (W8): unsigned `create_offer`/`accept`/`confirm_fiat`/`cancel`/`reclaim` + read helpers (contract id is a parameter). */
+export * as p2p from "./p2p/index.ts";
+// Root type re-exports so the shell can type a P2P client without a namespace import.
+export type { Offer, OfferState, P2pCall, P2pClient } from "./p2p/index.ts";

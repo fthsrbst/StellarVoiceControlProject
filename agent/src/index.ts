@@ -148,3 +148,14 @@ export {
   type CancelScheduleInput,
   type SchedulePaymentInput,
 } from "./tools/schedule.ts";
+  p2pAcceptTool,
+  p2pConfirmTool,
+  p2pOfferTool,
+  parseOfferId,
+  parseP2pAccept,
+  parseP2pConfirm,
+  parseP2pOffer,
+  parseTryPrice,
+  type P2pOfferIdInput,
+  type P2pOfferInput,
+} from "./tools/p2p.ts";

@@ -19,6 +19,7 @@ import { OpenAiCompatibleLlm } from "./llm/openai.ts";
 import { depositTool, withdrawTool } from "./tools/anchor.ts";
 import { sendPaymentTool } from "./tools/payment.ts";
 import { cancelScheduleTool, schedulePaymentTool } from "./tools/schedule.ts";
+import { p2pAcceptTool, p2pConfirmTool, p2pOfferTool } from "./tools/p2p.ts";
 import { createToolRegistry, type ToolRegistry } from "./tools/registry.ts";
 
 /**
@@ -41,6 +42,9 @@ export function createDefaultRegistry(): ToolRegistry {
     .register(withdrawTool);
     .register(schedulePaymentTool)
     .register(cancelScheduleTool);
+    .register(p2pOfferTool)
+    .register(p2pAcceptTool)
+    .register(p2pConfirmTool);
 }
 
 export interface AgentRuntime {
