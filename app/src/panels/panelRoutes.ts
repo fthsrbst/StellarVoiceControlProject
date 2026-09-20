@@ -9,7 +9,11 @@
  * typed route out, so the hash grammar is unit-testable.
  */
 
-/** Panels that exist. Must match the Rust allow-list one-for-one. */
+/**
+ * Panels that exist. Must match the Rust allow-list one-for-one. This union is
+ * the frontend's single source of truth: `@/lib/panels` re-exports it rather
+ * than declaring a second list, so adding a panel is one edit here.
+ */
 export type PanelName = "wallet" | "approval" | "settings";
 
 export const PANEL_NAMES: readonly PanelName[] = ["wallet", "approval", "settings"];

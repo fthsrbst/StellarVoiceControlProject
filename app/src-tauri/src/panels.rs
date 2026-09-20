@@ -141,13 +141,11 @@ pub fn open(app: &AppHandle, name: &str) -> Result<(), PanelError> {
 /// the window (see [`handle_window_event`]), which is what makes the reuse
 /// actually preserve state.
 pub fn open_spec(app: &AppHandle, spec: &PanelSpec) -> Result<(), PanelError> {
-    if let Some(window) = app.get_webview_window(spec.label) {
-        window.show().map_err(window_error)?;
-        window.set_focus().map_err(window_error)?;
-        return Ok(());
+    if app.get_webview_window(spec.label).is_some() {
+        return show_and_focus(app, spec);
     }
 
-    let window = WebviewWindowBuilder::new(app, spec.label, WebviewUrl::App(panel_url(spec).into()))
+    match WebviewWindowBuilder::new(app, spec.label, WebviewUrl::App(panel_url(spec).into()))
         .title(spec.title)
         .inner_size(spec.width, spec.height)
         .resizable(spec.resizable)
@@ -157,10 +155,39 @@ pub fn open_spec(app: &AppHandle, spec: &PanelSpec) -> Result<(), PanelError> {
         // the wrong size before its webview has painted.
         .visible(false)
         .build()
-        .map_err(window_error)?;
+    {
+        Ok(window) => {
+            window.show().map_err(window_error)?;
+            window.set_focus().map_err(window_error)?;
+            Ok(())
+        }
+        // Lost a create race (a tray click and `open_panel` at once): the winner
+        // built exactly this window, so focus it instead of reporting a failure.
+        Err(error) if is_label_collision(&error) => show_and_focus(app, spec),
+        Err(error) => Err(window_error(error)),
+    }
+}
+
+/// Shows and focuses an already-built panel window.
+fn show_and_focus(app: &AppHandle, spec: &PanelSpec) -> Result<(), PanelError> {
+    let window = app
+        .get_webview_window(spec.label)
+        .ok_or_else(|| PanelError::Window {
+            message: format!("panel window {} is missing", spec.label),
+        })?;
     window.show().map_err(window_error)?;
     window.set_focus().map_err(window_error)?;
     Ok(())
+}
+
+/// True when a build failed only because another caller created that label
+/// first. Window and webview labels are unique independently, so either kind
+/// means a race — not a real failure.
+fn is_label_collision(error: &tauri::Error) -> bool {
+    matches!(
+        error,
+        tauri::Error::WindowLabelAlreadyExists(_) | tauri::Error::WebviewLabelAlreadyExists(_)
+    )
 }
 
 /// Hides a panel instead of destroying it when its close button is pressed.
@@ -170,8 +197,10 @@ pub fn open_spec(app: &AppHandle, spec: &PanelSpec) -> Result<(), PanelError> {
 /// open, and gives the close button the "dismiss" semantics a panel wants.
 pub fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-        if is_panel_label(window.label()) {
-            let _ = window.hide();
+        // Only swallow the close when the hide actually worked, so a window-server
+        // failure can never leave a visible panel the user cannot dismiss. If the
+        // hide fails the close proceeds and the next open rebuilds the window.
+        if is_panel_label(window.label()) && window.hide().is_ok() {
             api.prevent_close();
         }
     }
@@ -277,6 +306,19 @@ mod tests {
         assert!(resolve(APPROVAL).unwrap().always_on_top);
         assert!(!resolve(WALLET).unwrap().always_on_top);
         assert!(!resolve(SETTINGS).unwrap().always_on_top);
+    }
+
+    /// A create race (tray vs. `open_panel`) must be invisible: the loser focuses
+    /// the winner's window instead of surfacing a spurious window error.
+    #[test]
+    fn a_label_collision_is_recognised_but_other_errors_are_not() {
+        assert!(is_label_collision(&tauri::Error::WebviewLabelAlreadyExists(
+            "panel-wallet".into()
+        )));
+        assert!(is_label_collision(&tauri::Error::WindowLabelAlreadyExists(
+            "panel-wallet".into()
+        )));
+        assert!(!is_label_collision(&tauri::Error::InvalidWindowHandle));
     }
 
     #[test]

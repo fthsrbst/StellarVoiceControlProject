@@ -30,7 +30,13 @@ export function PanelShell({ title, subtitle, children }: PanelShellProps) {
           variant="ghost"
           size="sm"
           aria-label="Close panel"
-          onClick={() => void getCurrentWindow().close()}
+          onClick={() => {
+            void getCurrentWindow()
+              .close()
+              .catch((error: unknown) => {
+                console.warn("panel could not close", error);
+              });
+          }}
         >
           Close
         </Button>

@@ -36,7 +36,15 @@ export function WalletPanel() {
           </dd>
         </dl>
         {/* Also demonstrates the typed wrapper for opening another panel. */}
-        <Button variant="secondary" size="sm" onClick={() => void openPanel("settings")}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => {
+            void openPanel("settings").catch((error: unknown) => {
+              console.warn("wallet could not open the settings panel", error);
+            });
+          }}
+        >
           Open settings
         </Button>
       </div>

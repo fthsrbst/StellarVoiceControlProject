@@ -7,8 +7,14 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-/** Panel names the Rust registry accepts. */
-export type PanelName = "wallet" | "approval" | "settings";
+import type { PanelName } from "@/panels/panelRoutes";
+
+/**
+ * Panel names the Rust registry accepts. `panelRoutes.ts` owns the union (it is
+ * the pure module tested against the hash grammar), so this re-export is the
+ * only declaration — do not redeclare it here.
+ */
+export type { PanelName };
 
 /**
  * Opens (or focuses) a panel window by name.
