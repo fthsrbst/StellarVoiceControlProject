@@ -131,6 +131,7 @@
 - [x] Tests: `parsePanelRoute` (app) + panel registry (Rust, no window); docs `docs/ui-panels.md` (2026-09-20).
 - [x] Independent-review corrections applied: UI promise rejections caught, single `PanelName` source, failed-`hide()` fallback, create-race collision focuses the existing window (+1 Rust test) (2026-09-20, report §8).
 - [x] W0c: five more panel skeletons registered (`security`/`schedules`/`suggestions`/`anchor`/`p2p`) + tray reworked to one item per panel (2026-09-20, branch `feat/w0c-more-panels`, `backlog/w0c-more-panels.md`).
+- [x] RMTRAY: menu-bar tray removed (setup/menu/handlers + `tray-icon` feature); notch "⋯" menu (`MoreMenu.tsx`) opens the panels and Quit (new `quit_app` command) (2026-09-20, branch `chore/remove-tray-icon`, `backlog/rm-tray.md`).
 - **Accept:** `npm run check` / `npm test -w @polaris/app` / `npm run build -w @polaris/app` / `cargo test` / `cargo clippy -D warnings` green. Tray icon, focusable windows and close-keeps-app-alive are **unverified** — need a human on a real Mac (`backlog/w0-panel-windows.md`).
 #### W0d — Shared panel transaction pipeline 🔲
 - [x] `app/src/lib/txPipeline.ts` (`runTx`/`runTxSequence`, injectable approver/signer/clock, never throws) + `useTxRun.ts` hook + `docs/ui-panels.md` §10 (2026-09-20, `feat/w0d-tx-pipeline`).
