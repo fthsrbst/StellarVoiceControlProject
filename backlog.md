@@ -12,6 +12,7 @@
 
 | Date | Task | Worker/Agent | Status | Report | Priority |
 |---|---|---|---|---|---|
+| 2026-09-20 | **W1 — network wiring**: `stellar_config` command + `StellarConfig`, build-then-approve execution seam (summary + `payloadHash`), lazy `chain.ts` config with alias merge, live `e2e:build-xdr` proof; signing/submission handed off | worker (deepseek-v4.1-flash) | open (review) | `backlog/w1-network-wiring.md` | P0 |
 | 2026-09-19 | **A0 — harness**: global hotkey (press/release) + microphone capture to WAV + wire both into the existing log pane; delete the temporary `dev_self_test` command | Owner A | open | `backlog/2026-09-19-monorepo-skeleton.md` | P0 |
 | 2026-09-19 | Owner B: fill in `stellar/` (anchor SEP-10/38/6 client, `sendPayment` tool) — stubs throw `NotImplementedError` today | Owner B | open | `backlog/2026-09-19-monorepo-skeleton.md` | P0 |
 | 2026-09-19 | **TTS voice**: no professional Turkish voice on Fish Audio; decide spoken-output language. Also: expose a user-facing male/female voice choice (Sarah / Ethan) in a later milestone | Owner A | open | `backlog/2026-09-19-tts-voice-selection.md` | P1 |

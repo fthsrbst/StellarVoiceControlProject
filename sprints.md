@@ -63,6 +63,14 @@
 > the Rust terminal. WAV retention (delete-on-success, cap 10, keep failures) lands here.
 > Build/test/clippy/typecheck all green; real-provider latency and the 5-command
 > acceptance run are **unverified** (no API key in this environment). See the A1 report.
+>
+> 2026-09-20 — **W1 network wiring** (`feat/w1-network-wiring`): the Rust `stellar_config`
+> command (allow-listed, validated) now feeds the webview; `app/src/lib/chain.ts` lazily
+> configures Owner B's `sendPayment` with the owner address + env aliases merged over
+> `aliases.json`; and the A9 execution seam is reordered to **build the unsigned XDR first**,
+> then ask the approver with the decoded `summary` + `payloadHash`. A live read-only script
+> (`npm run e2e:build-xdr`) printed a real testnet unsigned XLM XDR for acc1→acc2. Signing and
+> submission remain a later milestone. See `backlog/w1-network-wiring.md`.
 
 #### A0 — Push-to-talk + notch overlay harness ✅
 > Design pivot (2026-09-19): the dashboard/log-pane harness was replaced by the notch
@@ -117,7 +125,7 @@
 - [x] (2026-09-20, chain-lane PR) **C1.** Real `sendPayment` ChainTool: `Intent` → unsigned XDR + decoded summary; alias resolution via committed `aliases.json` first (D1 step 1)
 - [x] (2026-09-20, chain-lane PR) **C2.** `polaris_guard` owner-side TypeScript client: `set_rule`, `set_alias`, SAC `approve`, `pay_executor`, plus `direct` / `guarded` modes of `sendPayment` (D1 step 2)
 - [x] (2026-09-20, chain-lane PR) **C3.** Headless end-to-end script: `Intent` → XDR → dev-key sign → `submitSignedTx` → testnet tx; over-limit rejected with guard error **#105** (`NeedsOwnerApproval`) (D1 step 3)
-- [ ] **C4.** Registration/adapter so a shell can turn an `Intent` into a `ChainToolResult`; expose `@polaris/stellar` to the webview (no voice dependency)
+- [x] **C4.** Registration/adapter so a shell can turn an `Intent` into a `ChainToolResult`; expose `@polaris/stellar` to the webview (no voice dependency) — (2026-09-20, `feat/w1-network-wiring`: `stellar_config` Rust command → `app/src/lib/chain.ts` lazily configures `sendPayment`; the A9 seam now builds the XDR before the approval gate and hands the card `summary` + `payloadHash`; live `e2e:build-xdr`) — see `backlog/w1-network-wiring.md`
 - [ ] **C5. (PROPOSED)** Signing option: Rust approval gate + TypeScript signing/submission (option 1) for the demo; full Rust-native signer post-hackathon
 - [ ] **C6. (PROPOSED)** Standardise signing on XDR: `SigningService.sign(payloadHash)` → `signTransaction(xdr)` — needs Owner A agreement
 - [x] (2026-09-20, chain-lane PR) **C7.** Guard client + keeper take the contract id as a parameter (e.g. `GUARD_CONTRACT_ID`), never hard-coded, so v0.1 and v0.2 (`polaris_guard_v2`) run side by side (D9)
