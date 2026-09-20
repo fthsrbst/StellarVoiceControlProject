@@ -130,6 +130,7 @@
 #### W0d — Shared panel transaction pipeline 🔲
 - [x] `app/src/lib/txPipeline.ts` (`runTx`/`runTxSequence`, injectable approver/signer/clock, never throws) + `useTxRun.ts` hook + `docs/ui-panels.md` §10 (2026-09-20, `feat/w0d-tx-pipeline`).
 - [ ] **Accept:** `npm run check` / `npm test -w @polaris/app` (173 pass) / `npm run build -w @polaris/app` green; real Touch ID + Freighter round trip from a panel is **unverified** (needs a human). Trace: `backlog/w0d-tx-pipeline.md`
+- [x] (2026-09-20, branch `feat/w6c-wallet-suggestions`) **W6c.** Wallet panel (owner/network/balances/alias book/last-10 payments + clear states + Refresh) and Suggestions panel (offline `suggest()` over owner Horizon history; Accept→opens panel + copies draft, Dismiss→`localStorage`); `wallet`/`suggestions` Debug checks; app check/tests (202 pass)/build green — `backlog/w6c-wallet-suggestions.md`
 #### W3 — Touch ID approval gate (Rust) 🔲
 - [x] `biometric.rs` (`LAContext` device-owner auth, reason sanitising), `approval.rs` (one-request state machine, hash binding, webview commands, in-process `take_authorized`), `health.rs` (Debug health + self-test) — 2026-09-20, `feat/w3-touchid-gate`
 - [x] Independent-review fixes: `WalletOnly` unreachable from the webview (in-process `begin_wallet_only` only), `{kind,message}` error contract + snapshot returns (W2), panic-safe `in_flight` guard — 2026-09-20
