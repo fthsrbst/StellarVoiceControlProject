@@ -85,9 +85,24 @@ function describeArg(value: unknown): string {
   return String(value);
 }
 
-/** True when `value` is one of the contract's offer states. */
+/** True when `value` is one of the contract's offer states (bare symbol form). */
 export function isOfferState(value: unknown): value is OfferState {
   return typeof value === "string" && (OFFER_STATES as readonly string[]).includes(value);
+}
+
+/**
+ * Normalise the contract's `OfferState`. Soroban encodes a `#[contracttype]`
+ * enum as a one-element vector (`scvVec([scvSymbol(name)])`), which
+ * `scValToNative` maps to `[name]`; a decoded bare `name` is also accepted for
+ * older/other SDK paths. Anything else is a schema drift and is rejected.
+ */
+export function normalizeOfferState(value: unknown): OfferState {
+  if (isOfferState(value)) return value;
+  if (Array.isArray(value) && value.length === 1 && isOfferState(value[0])) return value[0];
+  throw new P2pRefusal(
+    "simulation_failed",
+    `get_offer returned an unknown state: ${JSON.stringify(value)}`,
+  );
 }
 
 /**
@@ -100,27 +115,30 @@ export function decodeOffer(value: unknown): Offer {
     throw new P2pRefusal("simulation_failed", "get_offer returned a non-struct value");
   }
   const raw = value as Record<string, unknown>;
-  const state = raw.state;
-  if (!isOfferState(state)) {
-    throw new P2pRefusal("simulation_failed", `get_offer returned an unknown state: ${JSON.stringify(state)}`);
-  }
-  const buyer = raw.buyer;
   const asBigInt = (field: unknown, name: string): bigint => {
     if (typeof field === "bigint") return field;
     if (typeof field === "number" && Number.isInteger(field)) return BigInt(field);
     throw new P2pRefusal("simulation_failed", `get_offer field ${name} is not an integer`);
   };
+  const asAddress = (field: unknown, name: string): string => {
+    if (typeof field !== "string" || field.length === 0) {
+      throw new P2pRefusal("simulation_failed", `get_offer field ${name} is not an address`);
+    }
+    return field;
+  };
+  const buyer = raw.buyer;
   return {
     id: asBigInt(raw.id, "id"),
-    seller: String(raw.seller),
-    token: String(raw.token),
+    seller: asAddress(raw.seller, "seller"),
+    token: asAddress(raw.token, "token"),
     amount: asBigInt(raw.amount, "amount"),
     price_try_kurus: asBigInt(raw.price_try_kurus, "price_try_kurus"),
     created_at: asBigInt(raw.created_at, "created_at"),
     expires_at: asBigInt(raw.expires_at, "expires_at"),
-    buyer: buyer === null || buyer === undefined ? null : String(buyer),
+    // `Option<Address>` decodes to `null` (void) or the address string.
+    buyer: buyer === null || buyer === undefined ? null : asAddress(buyer, "buyer"),
     accepted_at: asBigInt(raw.accepted_at, "accepted_at"),
     pay_deadline: asBigInt(raw.pay_deadline, "pay_deadline"),
-    state,
+    state: normalizeOfferState(raw.state),
   };
 }

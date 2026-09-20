@@ -12,7 +12,13 @@ export {
   DEFAULT_TX_TIMEOUT_SECONDS,
 } from "./client.ts";
 export { KURUS_PER_LIRA, kurusToTry, tryToKurus } from "./amount.ts";
-export { buildP2pCallSummary, decodeOffer, isOfferState, type P2pWriteFunction } from "./describe.ts";
+export {
+  buildP2pCallSummary,
+  decodeOffer,
+  isOfferState,
+  normalizeOfferState,
+  type P2pWriteFunction,
+} from "./describe.ts";
 export { P2pRefusal, asP2pRefusal, isP2pRefusal, type P2pRefusalCode } from "./errors.ts";
 export { OFFER_STATES } from "./types.ts";
 export type {

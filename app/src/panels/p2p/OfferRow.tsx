@@ -24,10 +24,9 @@ export interface OfferRowProps {
   onAction: (action: P2pAction) => void;
 }
 
-/** One offer, with the single action the viewer may take next. */
+/** One offer, with every action the viewer may take now. */
 export function OfferRow({ view, busy, onAction }: OfferRowProps) {
   const role = ROLE_LABEL[view.role];
-  const actionable = ACTIONABLE.includes(view.next);
   return (
     <li className="rounded-lg border border-polaris-line bg-polaris-panel/40 p-3">
       <div className="flex items-center justify-between gap-2">
@@ -49,18 +48,33 @@ export function OfferRow({ view, busy, onAction }: OfferRowProps) {
         {view.rate} · seller {view.sellerLabel}
         {view.buyer ? ` · buyer ${view.buyer.slice(0, 4)}…${view.buyer.slice(-4)}` : ""}
       </p>
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="text-[10px] leading-4 text-polaris-muted">{actionHint(view.next, view.state)}</span>
-        {actionable ? (
-          <Button
-            size="sm"
-            variant={view.next === "cancel" || view.next === "reclaim" ? "danger" : "default"}
-            disabled={busy}
-            onClick={() => onAction(view.next)}
-          >
-            {actionLabel(view.next)}
-          </Button>
-        ) : null}
+      <div className="mt-2 space-y-1.5">
+        {view.actions.length === 0 ? (
+          <span className="text-[10px] leading-4 text-polaris-muted">
+            {actionHint("none", view.state)}
+          </span>
+        ) : (
+          view.actions.map((action) => {
+            const actionable = ACTIONABLE.includes(action);
+            return (
+              <div key={action} className="flex items-center justify-between gap-2">
+                <span className="text-[10px] leading-4 text-polaris-muted">
+                  {actionHint(action, view.state)}
+                </span>
+                {actionable ? (
+                  <Button
+                    size="sm"
+                    variant={action === "cancel" || action === "reclaim" ? "danger" : "default"}
+                    disabled={busy}
+                    onClick={() => onAction(action)}
+                  >
+                    {actionLabel(action)}
+                  </Button>
+                ) : null}
+              </div>
+            );
+          })
+        )}
       </div>
     </li>
   );

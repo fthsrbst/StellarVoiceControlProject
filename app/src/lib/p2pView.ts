@@ -38,7 +38,8 @@ export interface OfferView {
   /** Human "expires in" label, or `"expired"`. */
   expiresIn: string;
   role: P2pRole;
-  next: P2pAction;
+  /** The actions the viewer may take now, in display order; empty means none. */
+  actions: P2pAction[];
 }
 
 /** `GABC…WXYZ` for compact display. */
@@ -63,6 +64,7 @@ export function formatTry(kurus: bigint): string {
 /** TRY-per-token rate for a whole token; `"?"` when the amount is zero. */
 export function formatRate(amountRaw: bigint, priceKurus: bigint): string {
   if (amountRaw <= 0n) return "?";
+  // Display-only: rounds the rate down to whole TRY per token.
   const kurusPerToken = (priceKurus * RAW_UNITS_PER_TOKEN) / amountRaw;
   return `${formatTry(kurusPerToken)} TRY/token`;
 }
@@ -91,22 +93,30 @@ export function roleOf(offer: Offer, owner: string | null): P2pRole {
 }
 
 /**
- * The single action the viewer may take next, derived from the contract state
- * and the viewer's role. `wait` means the flow is in someone else's hands
- * (the buyer must pay TRY off-chain before the seller confirms).
+ * The actions the viewer may take next, derived from the contract state and the
+ * viewer's role. `wait` means the flow is in someone else's hands (the buyer
+ * must pay TRY off-chain before the seller confirms). An empty list means the
+ * contract accepts no action from this viewer.
  */
-export function nextAction(offer: Offer, owner: string | null, nowSeconds: number): P2pAction {
+export function nextActions(offer: Offer, owner: string | null, nowSeconds: number): P2pAction[] {
   const role = roleOf(offer, owner);
+  const now = BigInt(nowSeconds);
   switch (offer.state) {
-    case "Open":
-      return role === "seller" ? "cancel" : "accept";
+    case "Open": {
+      const expired = offer.expires_at > 0n && now >= offer.expires_at;
+      if (role === "seller") return expired ? ["reclaim"] : ["cancel"];
+      // The contract rejects `accept` at or after `expires_at`.
+      return expired ? [] : ["accept"];
+    }
     case "Accepted": {
-      if (role !== "seller") return role === "buyer" ? "wait" : "none";
-      const deadline = Number(offer.pay_deadline);
-      return deadline > 0 && nowSeconds >= deadline ? "reclaim" : "confirm";
+      if (role !== "seller") return role === "buyer" ? ["wait"] : [];
+      // `reclaim` needs `now > pay_deadline` (strict); `confirm` stays legal
+      // while Accepted, including after the deadline — so offer both then.
+      const pastDeadline = offer.pay_deadline > 0n && now > offer.pay_deadline;
+      return pastDeadline ? ["confirm", "reclaim"] : ["confirm"];
     }
     default:
-      return "none";
+      return [];
   }
 }
 
@@ -169,6 +179,6 @@ export function offerView(offer: Offer, owner: string | null, nowSeconds: number
     expiresAt: Number(offer.expires_at),
     expiresIn: formatExpiresIn(Number(offer.expires_at), nowSeconds),
     role: roleOf(offer, owner),
-    next: nextAction(offer, owner, nowSeconds),
+    actions: nextActions(offer, owner, nowSeconds),
   };
 }

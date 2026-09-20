@@ -1,18 +1,16 @@
 /**
  * Typed, machine-readable errors for the P2P client.
  *
- * The `polaris_p2p_escrow` contract is written in parallel and its numeric
- * error codes are not frozen here, so a simulation failure is surfaced as a
- * `P2pRefusal` with the raw host message rather than a guessed contract code.
- * Callers must match on `code`, never on the human `message`.
+ * The escrow's contract error discriminants (`200..211`) are public ABI, but the
+ * client does not map host error numbers here: a simulation failure is surfaced
+ * as a `P2pRefusal` with the raw host message. Callers must match on `code`,
+ * never on the human `message`.
  */
 
 export type P2pRefusalCode =
   | "not_configured"
   | "invalid_intent"
-  | "invalid_amount"
   | "invalid_price"
-  | "offer_not_found"
   | "simulation_failed";
 
 /** A typed P2P failure. `details` is advisory context. */

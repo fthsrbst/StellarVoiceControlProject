@@ -15,7 +15,7 @@
 ## Decisions
 - Only the token is escrowed; TRY is off-chain and never moved by Polaris (stated in UI and summaries). No arbiter.
 - `confirm` is offered to the seller only; `reclaim` only after `pay_deadline`. Buyer sees "Waiting for TRY".
-- Offer state decoding assumes the contract enum serialises as a symbol/string (`scValToNative`); validated offline only.
+- Offer state decoding normalises the contract's `OfferState` union (`["Open"]`, or a bare symbol) and rejects anything else; proven against a snapshot-shaped map and a live testnet read.
 
 ## Verification (all run in this worktree)
 - `npm run check` (all workspaces): pass.
@@ -30,3 +30,22 @@
 - Live testnet: contract `polaris_p2p_escrow` is parallel work; `POLARIS_P2P_CONTRACT_ID` unset here, so all client/panel/tests run with mocked RPC.
 - Needs a human on a real Mac: panel rendering, Touch ID + Freighter round trip, and the real contract's enum/`Option` encoding.
 - The Rust `IntentKind` + bridge test edits are outside the named scope (noted above).
+
+## Review fixes (W8b-fix, 2026-09-20)
+- BLOCKER 1: `OfferState` is now decoded as the real union — `["Open"]` or a bare symbol — via `normalizeOfferState` (rejects anything else); `offerScVal` emits `scvVec([scvSymbol(name)])` and new tests decode a snapshot-shaped map. `seller`/`token`/`buyer` are validated as addresses; encodes audited against the ABI (Address/i128/u64/u32 unchanged).
+- Live read (simulation only): added `scripts/p2p-live-read.mjs` (`npm run p2p:live`); real testnet output below.
+- MAJOR 2/3/4: `nextActions` returns a list; an Accepted seller after `pay_deadline` gets `confirm` + `reclaim`, reclaim needs strict `now > pay_deadline`, and an expired Open offer offers no Accept.
+- MINOR 5/6: the panel pages `list_open` by the 20-id window with "Load more offers"; `p2p_accept` (voice) and the panel accept fetch `getOffer` and put amount/price/seller in the summary, so a misheard id is not approved blind.
+- MINOR 7: fixed the `errors.ts` doc (discriminants are public ABI `200..211`); removed the dead `invalid_amount`/`offer_not_found` codes.
+- NIT: `client.ts` reuses `guard/invoke.ts` (`buildUnsignedInvoke`/`simulateReadValue`); `formatRate` documents its display-only truncation.
+
+## Verification (W8b-fix re-run)
+- `npm run check`: all 4 workspaces, exit 0. `npm run build -w @polaris/app`: success.
+- `npm test -w @polaris/stellar`: keeper **67 pass/0 fail**; vitest **959 pass/0 fail** (p2p **17/17**), total 1026. `npm test -w @polaris/app`: **182 pass/0 fail**.
+- Live read against `CBMXLTXS76…` (source: W8a deployer; nothing signed/submitted):
+```
+next_offer_id: 2
+list_open(1, 20): 0 open offer(s)
+get_offer(1): {"id":"1","seller":"GAIDD…TQFK","token":"CD5PX…LNZ7","amount":"1000000000","price_try_kurus":"400000","created_at":"1789866897","expires_at":"1789870497","buyer":"GCH76…TDIRN","accepted_at":"1789866912","pay_deadline":"1789868712","state":"Settled"}
+```
+

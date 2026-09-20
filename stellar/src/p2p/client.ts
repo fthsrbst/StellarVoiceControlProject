@@ -8,23 +8,15 @@
  * The contract id is a required option — never a constant — so the app can pick
  * the configured testnet deployment and a future v2 can run side by side (D9).
  */
-import {
-  BASE_FEE,
-  Contract,
-  TransactionBuilder,
-  nativeToScVal,
-  rpc as StellarRpc,
-  scValToNative,
-} from "@stellar/stellar-sdk";
+import { nativeToScVal } from "@stellar/stellar-sdk";
 import type { xdr } from "@stellar/stellar-sdk";
 
 import { fromRawUnits } from "../guard/amount.ts";
+import { buildUnsignedInvoke, simulateReadValue } from "../guard/invoke.ts";
 import { buildP2pCallSummary, decodeOffer, type P2pWriteFunction } from "./describe.ts";
-import { P2pRefusal } from "./errors.ts";
+import { asP2pRefusal, P2pRefusal } from "./errors.ts";
 import { kurusToTry } from "./amount.ts";
-import type { Offer, P2pCall, P2pClient, P2pClientOptions } from "./types.ts";
-
-const { Api, assembleTransaction } = StellarRpc;
+import type { Offer, P2pCall, P2pClient, P2pClientOptions, P2pRpcLike } from "./types.ts";
 
 /** Default transaction validity window (seconds), mirroring the guard client. */
 export const DEFAULT_TX_TIMEOUT_SECONDS = 300;
@@ -37,64 +29,32 @@ const scI128 = (amount: bigint): xdr.ScVal => nativeToScVal(amount, { type: "i12
 const scU64 = (n: bigint): xdr.ScVal => nativeToScVal(n, { type: "u64" });
 const scU32 = (n: number): xdr.ScVal => nativeToScVal(n, { type: "u32" });
 
-/** Build + simulate + assemble an unsigned write. */
-async function buildWrite(
-  rpc: P2pClientOptions["rpc"],
-  opts: {
-    contractId: string;
-    method: string;
-    args: xdr.ScVal[];
-    source: string;
-    networkPassphrase: string;
-    txTimeoutSeconds: number;
-  },
-): Promise<string> {
-  const account = await rpc.getAccount(opts.source);
-  const contract = new Contract(opts.contractId);
-  const tx = new TransactionBuilder(account, {
-    fee: BASE_FEE,
-    networkPassphrase: opts.networkPassphrase,
-  })
-    .addOperation(contract.call(opts.method, ...opts.args))
-    .setTimeout(opts.txTimeoutSeconds)
-    .build();
-  const sim = await rpc.simulateTransaction(tx);
-  if (Api.isSimulationError(sim)) {
-    throw new P2pRefusal("simulation_failed", `${opts.method} simulation failed: ${sim.error}`);
+interface InvokeArgs {
+  contractId: string;
+  method: string;
+  args: xdr.ScVal[];
+  source: string;
+  networkPassphrase: string;
+  txTimeoutSeconds: number;
+}
+
+/** Build + simulate + assemble an unsigned write, mapping failures to refusals. */
+async function buildWrite(rpc: P2pRpcLike, opts: InvokeArgs): Promise<string> {
+  try {
+    const { unsignedXdr } = await buildUnsignedInvoke(rpc, opts);
+    return unsignedXdr;
+  } catch (error) {
+    throw asP2pRefusal(error);
   }
-  return assembleTransaction(tx, sim).build().toXDR();
 }
 
 /** Simulate a read-only invocation and decode its return value. */
-async function simulateRead(
-  rpc: P2pClientOptions["rpc"],
-  opts: {
-    contractId: string;
-    method: string;
-    args: xdr.ScVal[];
-    source: string;
-    networkPassphrase: string;
-    txTimeoutSeconds: number;
-  },
-): Promise<unknown> {
-  const account = await rpc.getAccount(opts.source);
-  const contract = new Contract(opts.contractId);
-  const tx = new TransactionBuilder(account, {
-    fee: BASE_FEE,
-    networkPassphrase: opts.networkPassphrase,
-  })
-    .addOperation(contract.call(opts.method, ...opts.args))
-    .setTimeout(opts.txTimeoutSeconds)
-    .build();
-  const sim = await rpc.simulateTransaction(tx);
-  if (Api.isSimulationError(sim)) {
-    throw new P2pRefusal("simulation_failed", `${opts.method} simulation failed: ${sim.error}`);
+async function simulateRead(rpc: P2pRpcLike, opts: InvokeArgs): Promise<unknown> {
+  try {
+    return await simulateReadValue(rpc, opts);
+  } catch (error) {
+    throw asP2pRefusal(error);
   }
-  const retval = sim.result?.retval;
-  if (!retval) {
-    throw new P2pRefusal("simulation_failed", `${opts.method} simulation returned no value`);
-  }
-  return scValToNative(retval);
 }
 
 class SorobanP2pClient implements P2pClient {
