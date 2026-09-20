@@ -7,11 +7,14 @@
 //! (`docs/interfaces.md`).
 
 mod agent;
+mod approval;
+mod biometric;
 mod capture;
 mod commands;
 mod env;
 mod events;
 mod gesture;
+mod health;
 mod hotkey;
 mod hotkey_flags;
 mod notch;
@@ -47,6 +50,13 @@ pub fn run() {
             notch::notch_geometry,
             notch::notch_window_flags,
             hotkey::hotkey_permission,
+            approval::approval_begin,
+            approval::approval_authorize,
+            approval::approval_deny,
+            approval::approval_status,
+            approval::approval_current,
+            health::biometric_health,
+            health::biometric_selftest,
         ])
         .setup(|app| {
             // Captures live under the app data dir so they never land in the repo.
@@ -76,6 +86,13 @@ pub fn run() {
             // the `speak` command through managed state; it logs its choice and
             // any missing config itself.
             app.manage(tts::build_backend());
+
+            // Step W3: the Touch ID approval gate. The store holds the one
+            // pending approval that may be released to the Freighter bridge;
+            // the authenticator is the real LocalAuthentication prompt (a fake
+            // is used only in tests).
+            app.manage(approval::ApprovalStore::new());
+            app.manage(biometric::system());
 
             // Registers the Control+Option monitor and the Control+Option+Space
             // fallback; both feed the same capture latch.
