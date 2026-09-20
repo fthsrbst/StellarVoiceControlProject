@@ -97,6 +97,69 @@ export function confirmationSentence(intent: Intent, language?: string): string 
 }
 
 /**
+ * The post-submission report (W4b). Where [`confirmationSentence`] asks the user
+ * to authorise a transaction, this is what the shell says **after** the signed
+ * transaction reached the network — "Sent 10 XLM to acc2" — and what it says
+ * when the wallet declined. Both are short and localized, and both live here so
+ * there is still exactly one place that turns a structured result into words.
+ */
+type SubmissionReport = (intent: Intent) => string;
+
+const SUBMITTED: Record<string, SubmissionReport> = {
+  en: (intent) => {
+    const recipient = intent.recipient ?? intent.alias ?? "the recipient";
+    if (intent.kind === "send") {
+      return `Sent ${intent.amount} ${intent.asset} to ${recipient}.`;
+    }
+    return "Done.";
+  },
+  tr: (intent) => {
+    const recipient = intent.recipient ?? intent.alias ?? "alıcıya";
+    if (intent.kind === "send") {
+      return `${recipient} adresine ${intent.amount} ${intent.asset} gönderildi.`;
+    }
+    return "Tamamlandı.";
+  },
+};
+
+/**
+ * The sentence to speak once a transaction has been submitted, in `language`
+ * when a template exists and in English otherwise.
+ */
+export function submittedSentence(intent: Intent, language?: string): string {
+  const template = SUBMITTED[languageBase(language) ?? ""] ?? SUBMITTED.en;
+  return capSpokenText(template!(intent));
+}
+
+/**
+ * The short, localized sentences for the failure labels the signing path emits
+ * (`ExecutionOutcome.label`). An unrecognised label falls back to the label
+ * itself, so a new failure is still spoken rather than silently dropped.
+ */
+const FAILURE_SENTENCES: Record<string, Record<string, string>> = {
+  en: {
+    Cancelled: "Cancelled.",
+    "Not approved": "Cancelled.",
+    "Wallet didn't sign": "Wallet didn't sign.",
+    "Wallet timed out": "Wallet timed out.",
+    "Wrong network": "Wrong network.",
+  },
+  tr: {
+    Cancelled: "İptal edildi.",
+    "Not approved": "İptal edildi.",
+    "Wallet didn't sign": "Cüzdan imzalamadı.",
+    "Wallet timed out": "Cüzdan zaman aşımına uğradı.",
+    "Wrong network": "Yanlış ağ.",
+  },
+};
+
+/** A short spoken failure for a labelled outcome, in `language` when known. */
+export function failureSentence(label: string, language?: string): string {
+  const table = FAILURE_SENTENCES[languageBase(language) ?? ""] ?? FAILURE_SENTENCES.en;
+  return capSpokenText(table![label] ?? label);
+}
+
+/**
  * The hard ceiling on how many characters may ever reach TTS (step A12).
  *
  * The owner's real log showed the model rambling and Fish TTS cost scaling

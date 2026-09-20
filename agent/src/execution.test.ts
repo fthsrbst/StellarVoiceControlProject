@@ -81,7 +81,14 @@ test("the tool builds first and the approver receives the summary + payload hash
   // W1 order: the side-effect-free chain tool runs before the human decision, so
   // the card has something to show.
   assert.deepEqual(log, ["tool:send", "approve"]);
-  assert.deepEqual(seen, { intent: INTENT, summary: RESULT.summary, payloadHash: HASH });
+  // W4b: the request also carries the exact unsigned blob, so the gate can bind
+  // the released XDR to the digest the card showed.
+  assert.deepEqual(seen, {
+    intent: INTENT,
+    summary: RESULT.summary,
+    payloadHash: HASH,
+    unsignedXdr: RESULT.unsignedXdr,
+  });
 });
 
 test("the XDR digest can be injected (used by tests to pin the request)", async () => {
@@ -227,6 +234,49 @@ test("the placeholder approver approves and is clearly not Touch ID", async () =
   assert.equal(outcome.payloadHash, HASH);
 });
 
+test("the approval request carries the unsigned XDR the gate will release", async () => {
+  let seen: ApprovalRequest | undefined;
+  const outcome = await executeIntent(INTENT, {
+    approver: {
+      async approve(request) {
+        seen = request;
+        return { approved: false, reason: "no" };
+      },
+    },
+    chainTools: { send: async () => RESULT },
+  });
+
+  assert.equal(outcome.status, "rejected");
+  // The gate receives the blob even on deny: it stores nothing on a deny, but
+  // the request shape is uniform so the gate can hash-check what it was handed.
+  assert.equal(seen?.unsignedXdr, RESULT.unsignedXdr);
+  assert.equal(seen?.payloadHash, HASH);
+});
+
+test("an approver-supplied approvalId rides the executed outcome to the signer", async () => {
+  const outcome = await executeIntent(INTENT, {
+    approver: {
+      async approve() {
+        return { approved: true, approvalId: "apr_0000000000000001" };
+      },
+    },
+    chainTools: { send: async () => RESULT },
+  });
+
+  assert.equal(outcome.status, "executed");
+  assert.equal(outcome.approvalId, "apr_0000000000000001");
+});
+
+test("a decision without an approvalId leaves the outcome without one", async () => {
+  const outcome = await executeIntent(INTENT, {
+    approver: createAutoApprovalPlaceholder(),
+    chainTools: { send: async () => RESULT },
+  });
+
+  assert.equal(outcome.status, "executed");
+  assert.equal(outcome.approvalId, undefined);
+});
+
 test("isNotImplementedError matches by name, like the stellar stub contract", () => {
   const error = new Error("nope");
   error.name = "NotImplementedError";
@@ -369,7 +419,12 @@ test("the default approver fails closed: no auto-approval without an explicit op
 });
 
 test("the deny gate denies with a reason, and auto-approval needs the opt-in", async () => {
-  const request: ApprovalRequest = { intent: INTENT, summary: RESULT.summary, payloadHash: HASH };
+  const request: ApprovalRequest = {
+    intent: INTENT,
+    summary: RESULT.summary,
+    payloadHash: HASH,
+    unsignedXdr: RESULT.unsignedXdr,
+  };
   const denied = await createDenyApprover("no gate configured").approve(request);
   assert.equal(denied.approved, false);
   assert.equal(denied.reason, "no gate configured");

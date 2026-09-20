@@ -48,10 +48,12 @@ export {
 export {
   capSpokenText,
   confirmationSentence,
+  failureSentence,
   isSpeakable,
   MAX_SPOKEN_CHARS,
   SpeechQueue,
   spokenText,
+  submittedSentence,
   type SpeakFn,
   type SpokenResult,
 } from "./speech.ts";

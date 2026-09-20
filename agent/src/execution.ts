@@ -95,6 +95,14 @@ export interface ApprovalDecision {
   approved: boolean;
   /** Short, terminal-safe reason; shown when `approved` is false. */
   reason?: string;
+  /**
+   * The gate-assigned id of the approved request (W4b), when the approver has
+   * one. A real approver (the Touch ID gate) registers the request and hands
+   * this back so the signing step can release exactly that blob. It is absent
+   * for a gate that does not store requests (the deny/auto placeholders) and is
+   * never required for `approved: true`.
+   */
+  approvalId?: string;
 }
 
 /**
@@ -105,11 +113,19 @@ export interface ApprovalDecision {
  *
  * `payloadHash` here is never the Stellar transaction hash; see the module
  * header. The signing milestone must bind the signer to this digest.
+ *
+ * `unsignedXdr` was added in W4b so the gate can store the exact blob a signer
+ * will be handed: the Rust approval gate validates that the blob's digest equals
+ * `payloadHash` before it accepts the request, and releases the XDR only after a
+ * real gesture. It is the same value the chain tool returned, never a second
+ * source of truth.
  */
 export interface ApprovalRequest {
   intent: Intent;
   summary: ChainToolResult["summary"];
   payloadHash: string;
+  /** base64 unsigned transaction envelope; the gate binds it to `payloadHash`. */
+  unsignedXdr: string;
 }
 
 /**
@@ -316,6 +332,12 @@ export interface ExecutionOutcome {
    * to. It is never the Stellar transaction hash.
    */
   payloadHash?: string;
+  /**
+   * The gate-assigned approval id (W4b). Present iff `status === "executed"` and
+   * the approver supplied one; the signing step passes it to `bridge_sign` to
+   * release the approved blob. Absent for the deny/auto placeholders.
+   */
+  approvalId?: string;
 }
 
 export interface ExecuteIntentOptions {
@@ -446,7 +468,12 @@ export async function executeIntent(
   const result = rawResult;
 
   const payloadHash = (options.xdrDigest ?? xdrDigest)(result.unsignedXdr);
-  const request: ApprovalRequest = { intent, summary: result.summary, payloadHash };
+  const request: ApprovalRequest = {
+    intent,
+    summary: result.summary,
+    payloadHash,
+    unsignedXdr: result.unsignedXdr,
+  };
 
   let rawDecision: unknown;
   try {
@@ -486,5 +513,11 @@ export async function executeIntent(
     };
   }
 
-  return { status: "executed", intent, result, payloadHash };
+  return {
+    status: "executed",
+    intent,
+    result,
+    payloadHash,
+    ...(typeof decision.approvalId === "string" ? { approvalId: decision.approvalId } : {}),
+  };
 }
