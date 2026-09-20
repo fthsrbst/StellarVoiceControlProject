@@ -163,6 +163,9 @@
 - [ ] **V6.** Replace text input with the merged voice path
 - [ ] **V7. (stretch)** Touch ID (LocalAuthentication) behind the approval gate
 
+### Signing bridge
+- [x] (2026-09-20, branch `feat/w4a-freighter-bridge-page`, pending PR) **W4a.** Freighter signing bridge page (Stellar Wallets Kit): second Vite `/sign` entry, pure state machine, fail-closed address/network checks, signed-vs-unsigned hash binding, local fixture + tests, protocol docs (review fixes 2 applied; live Freighter still needs a human)
+
 ## Milestone 3 — Chain & Guard 🔲
 - [x] polaris_guard Soroban contract: per-tx/daily spending limit + alias book; deployed on testnet, contract ID documented (2026-09-19, PR #10 + keeper PR #9)
 - [ ] Anchor flow: SEP-10/38/6 TRY mock deposit → USDC balance, driven by voice

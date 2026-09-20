@@ -19,6 +19,7 @@
 | 2026-09-19 | **TTS voice**: no professional Turkish voice on Fish Audio; decide spoken-output language. Also: expose a user-facing male/female voice choice (Sarah / Ethan) in a later milestone | Owner A | open | `backlog/2026-09-19-tts-voice-selection.md` | P1 |
 | 2026-09-20 | **W0 — Interactive panel windows**: Rust panel registry + `open_panel` command, menu-bar tray (Wallet… / Settings… / Quit), `panel-*` capability, hash routing + panel skeletons; review corrections applied (§8 of the report), tray/window behaviour still needs a human on a real Mac | Owner A (worker) | open | `backlog/w0-panel-windows.md` | P0 |
 | 2026-09-20 | **W3 — Touch ID approval gate**: independent-review fixes applied (WalletOnly webview bypass closed via in-process `begin_wallet_only`; W2 `{kind,message}` error contract + snapshot returns; panic-safe `in_flight` guard; F3–F7/F10/F11). Real Touch ID/password/cancel still need a human; **W5 must land the Rust anchor check before any WalletOnly release; W4b must not enable WalletOnly** | opencode-go/deepseek-v4.1-flash (L2, W3) | in review | `backlog/w3-touch-id-gate.md` | P0 |
+| 2026-09-20 | **W4a — Freighter signing bridge page** (Stellar Wallets Kit): `/sign` second Vite entry, pure state machine, fail-closed address/network checks, signed-vs-unsigned hash binding, local fixture + tests, protocol docs; review fixes 2 applied | opencode worker (deepseek-v4.1-flash) | in review (fixes applied) | `backlog/w4a-freighter-bridge-page.md` | P0 |
 
 ## Completed Tasks (Archive)
 
