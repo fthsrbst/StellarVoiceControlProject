@@ -166,6 +166,7 @@
 - [ ] **V5.** Submit path: sign in TS, `submitSignedTx(signedXdr, unsignedXdr)`, emit `tx_submitted`
 - [ ] **V6.** Replace text input with the merged voice path
 - [ ] **V7. (stretch)** Touch ID (LocalAuthentication) behind the approval gate
+- [x] **F2.** Real assistant system prompt: `capabilities.ts` (role/behaviour + tool-registry capability list + config account table + few-shot examples), pure `accountRefs.ts` normalisation before the model and at validation, `app/src/lib/agent.ts` config wiring, live `npm run e2e:prompt` eval (31/31 = 100%) — `backlog/f2-assistant-prompt.md`
 
 ### Signing bridge
 - [x] (2026-09-20, branch `feat/w4a-freighter-bridge-page`, pending PR) **W4a.** Freighter signing bridge page (Stellar Wallets Kit): second Vite `/sign` entry, pure state machine, fail-closed address/network checks, signed-vs-unsigned hash binding, local fixture + tests, protocol docs (review fixes 2 applied; live Freighter still needs a human)
