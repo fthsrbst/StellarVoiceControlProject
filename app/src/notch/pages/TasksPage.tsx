@@ -1,103 +1,134 @@
 /**
- * Scheduled Tasks page — recurring / one-shot agent jobs.
+ * Tasks page — the owner's on-chain scheduled payments.
  *
- * Mirrors the guard's scheduler terminology (`next_run_at`, recurrence). The
- * enable toggle, delete button and "new task" row are all local state only —
- * mock wiring. A real `create_schedule` call replaces the state updates in a
- * follow-up task.
+ * Rows come from [`useTasksData`] (real `listUpcoming` when a wallet is
+ * configured, an explicit demo fallback otherwise). Cancel is the only
+ * value-moving action: it runs through the shared `txPipeline` (approval card →
+ * Touch ID → Freighter → submit) and the page shows its progress and outcome.
+ * Creating a schedule stays a voice action, so the empty state points at the
+ * spoken example instead of offering a form.
  */
-import { useState, type FormEvent } from "react";
-import { CalendarClock, Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { CalendarClock, LoaderCircle, RefreshCw, Trash2 } from "lucide-react";
 
-import {
-  MOCK_SCHEDULED_TASKS,
-  formatNextRun,
-  type ScheduledTask,
-} from "@/lib/mockData";
+import { useTasksData, type TaskRow } from "@/notch/data/useTasksData";
 
-/** Cheap unique id for locally added mock tasks. */
-let nextLocalId = 0;
+/** "5 XLM → acc2", or just the recipient label in demo mode. */
+function rowTitle(row: TaskRow): string {
+  return row.amountLabel ? `${row.amountLabel} → ${row.recipient}` : row.recipient;
+}
+
+/** "every week · 8 runs left · Scheduled" — omits what the source cannot say. */
+function rowMeta(row: TaskRow): string {
+  const runs =
+    row.runsLeft === null ? null : `${row.runsLeft} run${row.runsLeft === 1 ? "" : "s"} left`;
+  return [row.recurrence, runs, row.statusLabel].filter(Boolean).join(" · ");
+}
+
+interface TaskRowItemProps {
+  row: TaskRow;
+  busy: boolean;
+  disabled: boolean;
+  onCancel: (row: TaskRow) => void;
+}
+
+function TaskRowItem({ row, busy, disabled, onCancel }: TaskRowItemProps) {
+  return (
+    <li className="task-row">
+      <span className="task-main">
+        <span className="task-description">{rowTitle(row)}</span>
+        <span className="task-schedule">
+          <CalendarClock aria-hidden="true" />
+          {rowMeta(row)}
+        </span>
+        <span className="task-schedule">
+          <span className="selectable">{row.nextRunLocal}</span> local ·{" "}
+          <span className="selectable">{row.nextRunUtc}</span> UTC
+        </span>
+      </span>
+      {row.scheduleId !== null ? (
+        <button
+          type="button"
+          className="page-icon-button"
+          aria-label={`Cancel schedule #${row.scheduleId}`}
+          title={busy ? "Cancelling…" : "Cancel schedule"}
+          disabled={busy || disabled}
+          onClick={() => onCancel(row)}
+        >
+          {busy ? (
+            <LoaderCircle className="page-status is-pending" aria-hidden="true" />
+          ) : (
+            <Trash2 aria-hidden="true" />
+          )}
+        </button>
+      ) : null}
+    </li>
+  );
+}
 
 export function TasksPage() {
-  const [tasks, setTasks] = useState<ScheduledTask[]>(MOCK_SCHEDULED_TASKS);
-  const [draft, setDraft] = useState("");
+  const { rows, loading, error, demo, keeper, refresh, cancel, actionError, tx } = useTasksData();
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const running = tx.state === "running";
+  const last = tx.outcomes[tx.outcomes.length - 1];
 
-  const toggle = (id: string): void => {
-    setTasks((current) =>
-      current.map((task) =>
-        task.id === id ? { ...task, enabled: !task.enabled } : task,
-      ),
-    );
-  };
-
-  const remove = (id: string): void => {
-    setTasks((current) => current.filter((task) => task.id !== id));
-  };
-
-  // Mock scheduling: the row keeps the shape of the real flow (describe the
-  // task in words, the agent turns it into a schedule) without calling one.
-  const addTask = (event: FormEvent): void => {
-    event.preventDefault();
-    const description = draft.trim();
-    if (!description) return;
-    nextLocalId += 1;
-    setTasks((current) => [
-      {
-        id: `local-${nextLocalId}`,
-        schedule: "Not scheduled yet",
-        recurrence: "once",
-        description,
-        enabled: true,
-        nextRunAt: Math.floor(Date.now() / 1000),
-      },
-      ...current,
-    ]);
-    setDraft("");
+  const onCancel = async (row: TaskRow): Promise<void> => {
+    if (row.scheduleId === null || running) return;
+    setBusyId(row.scheduleId);
+    await cancel(row);
+    setBusyId(null);
   };
 
   return (
     <div className="page-stack">
-      <form className="task-new" onSubmit={addTask}>
-        <Plus className="task-new-icon" aria-hidden="true" />
-        <input
-          className="task-new-input"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder='New task, e.g. "every Friday — send 10 USDC to Alice"'
-          aria-label="New scheduled task"
-        />
-      </form>
-      <ul className="page-list task-list">
-        {tasks.map((task) => (
-          <li key={task.id} className={`task-row${task.enabled ? "" : " is-disabled"}`}>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={task.enabled}
-              aria-label={`${task.enabled ? "Disable" : "Enable"}: ${task.description}`}
-              className={`page-toggle${task.enabled ? " is-on" : ""}`}
-              onClick={() => toggle(task.id)}
-            >
-              <span className="page-toggle-knob" />
-            </button>
-            <span className="task-main">
-              <span className="task-description">{task.description}</span>
-              <span className="task-schedule">
-                <CalendarClock aria-hidden="true" />
-                {task.schedule} · next {formatNextRun(task.nextRunAt)}
-              </span>
-            </span>
-            <button
-              type="button"
-              className="page-icon-button"
-              aria-label={`Delete: ${task.description}`}
-              onClick={() => remove(task.id)}
-            >
-              <Trash2 aria-hidden="true" />
-            </button>
-          </li>
-        ))}
-      </ul>
+      {demo ? (
+        <p className="task-schedule">Demo data — no owner wallet is configured in this build.</p>
+      ) : null}
+
+      {keeper.needed ? (
+        <p className="task-schedule">
+          Keeper needed: <code className="selectable">{keeper.command}</code>
+        </p>
+      ) : null}
+
+      {error ? (
+        <p className="task-schedule">
+          {error}{" "}
+          <button type="button" className="page-icon-button" aria-label="Retry" onClick={refresh}>
+            <RefreshCw aria-hidden="true" />
+          </button>
+        </p>
+      ) : null}
+
+      {running && tx.progress ? (
+        <p className="task-schedule">
+          {tx.progress.label} — {tx.progress.phase}…
+        </p>
+      ) : actionError ? (
+        <p className="task-schedule">{actionError}</p>
+      ) : last && last.status === "submitted" ? (
+        <p className="task-schedule">Cancelled — the list was refreshed.</p>
+      ) : null}
+
+      {loading ? (
+        <p className="task-schedule">Loading upcoming payments…</p>
+      ) : error ? null : rows.length === 0 ? (
+        <p className="task-schedule">
+          No scheduled payments yet. Try saying: “her cuma 10:00’da acc2’ye 5 XLM gönder”.
+        </p>
+      ) : (
+        <ul className="page-list task-list">
+          {rows.map((row) => (
+            <TaskRowItem
+              key={row.key}
+              row={row}
+              busy={busyId === row.scheduleId}
+              disabled={running}
+              onCancel={(target) => void onCancel(target)}
+            />
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
