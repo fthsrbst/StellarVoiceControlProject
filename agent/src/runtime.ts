@@ -17,6 +17,7 @@ import {
 import { AnthropicLlm } from "./llm/anthropic.ts";
 import { OpenAiCompatibleLlm } from "./llm/openai.ts";
 import { sendPaymentTool } from "./tools/payment.ts";
+import { p2pAcceptTool, p2pConfirmTool, p2pOfferTool } from "./tools/p2p.ts";
 import { createToolRegistry, type ToolRegistry } from "./tools/registry.ts";
 
 /**
@@ -28,7 +29,11 @@ import { createToolRegistry, type ToolRegistry } from "./tools/registry.ts";
  * exported and used by `demo.ts` and the loop tests.
  */
 export function createDefaultRegistry(): ToolRegistry {
-  return createToolRegistry().register(sendPaymentTool);
+  return createToolRegistry()
+    .register(sendPaymentTool)
+    .register(p2pOfferTool)
+    .register(p2pAcceptTool)
+    .register(p2pConfirmTool);
 }
 
 export interface AgentRuntime {

@@ -15,7 +15,21 @@
  * 1. Intent — structured value-moving request
  * ------------------------------------------------------------------ */
 
-export type IntentKind = "deposit" | "swap" | "send" | "guard_policy" | "raw_tx";
+export type IntentKind =
+  | "deposit"
+  | "swap"
+  | "send"
+  | "guard_policy"
+  | "raw_tx"
+  // P2P escrow (W8): lock tokens and ask TRY off-chain, take an offer, confirm
+  // the off-chain TRY payment. Value-moving, so every one is approval-gated.
+  | "p2p_offer"
+  | "p2p_accept"
+  | "p2p_confirm"
+  // Panel-only escrow actions (no voice tool yet): cancel an open offer and
+  // reclaim after the pay deadline. They still go through the approval gate.
+  | "p2p_cancel"
+  | "p2p_reclaim";
 
 export interface Intent {
   kind: IntentKind;
@@ -30,6 +44,14 @@ export interface Intent {
   memo?: string;
   /** Voice transcript excerpt that produced it. */
   source?: string;
+  /**
+   * P2P offer only: the asking price in TRY as a decimal string (e.g. "3400").
+   * The off-chain TRY leg is never moved by Polaris; this is only the price the
+   * seller asks for and the rate the offer shows.
+   */
+  priceTry?: string;
+  /** P2P accept/confirm only: the on-chain offer id spoken by the user. */
+  offerId?: number;
 }
 
 /* ------------------------------------------------------------------ *
@@ -242,6 +264,8 @@ export interface StellarConfig {
   ownerAddress: string | null;
   aliases: Record<string, string>;
   guardContractId: string | null;
+  /** `POLARIS_P2P_CONTRACT_ID`; the deployed `polaris_p2p_escrow` id, or null. */
+  p2pContractId: string | null;
 }
 
 /* ------------------------------------------------------------------ *

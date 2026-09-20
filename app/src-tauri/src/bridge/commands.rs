@@ -696,6 +696,7 @@ mod tests {
             owner_address: Some(OWNER.to_string()),
             aliases: Default::default(),
             guard_contract_id: None,
+            p2p_contract_id: None,
         };
         let outcome = RunContext::from_authorized(
             released,

@@ -114,3 +114,15 @@ export {
   sendPaymentTool,
   type SendPaymentInput,
 } from "./tools/payment.ts";
+export {
+  p2pAcceptTool,
+  p2pConfirmTool,
+  p2pOfferTool,
+  parseOfferId,
+  parseP2pAccept,
+  parseP2pConfirm,
+  parseP2pOffer,
+  parseTryPrice,
+  type P2pOfferIdInput,
+  type P2pOfferInput,
+} from "./tools/p2p.ts";
