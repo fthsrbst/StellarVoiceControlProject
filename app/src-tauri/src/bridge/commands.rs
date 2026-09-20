@@ -180,12 +180,19 @@ impl RunContext {
             return BridgeOutcome::fail(&code, message);
         };
 
-        if signer_address != self.payload.address {
-            println!("polaris: bridge outcome=address_mismatch");
-            return BridgeOutcome::fail(
-                "address_mismatch",
-                "the wallet signed with a different account than the owner address",
-            );
+        // The page echoes `payload.address` here, so this is not an independent
+        // statement of who signed — `verify_signed` proves that cryptographically.
+        // It does confirm the reported address decodes to the very key Rust will
+        // verify against, and refuses anything that is not that owner key.
+        match strkey::decode_public_key(&signer_address) {
+            Some(key) if key == self.signer_key => {}
+            _ => {
+                println!("polaris: bridge outcome=address_mismatch");
+                return BridgeOutcome::fail(
+                    "address_mismatch",
+                    "the wallet reported a different account than the configured owner",
+                );
+            }
         }
 
         match verify::verify_signed(
@@ -305,28 +312,40 @@ pub async fn bridge_selftest(
         Ok(signer_key) => signer_key,
         Err(outcome) => return Ok(outcome),
     };
-
+    let payload = selftest_payload(xdr, &config, &owner);
     let context = RunContext {
-        payload: BridgePayload {
-            xdr,
-            network_passphrase: config.network_passphrase.clone(),
-            address: owner.to_string(),
-            payload_hash: crate::approval::payload_hash_of_xdr(""),
-            summary: crate::types::TxSummary {
-                title: "Freighter signing test (no funds)".to_string(),
-                lines: vec![
-                    "This transaction has sequence 0 and can never be submitted.".to_string(),
-                ],
-                explorer_url: None,
-                estimated_fee: "0.0000100 XLM".to_string(),
-            },
-        },
+        payload,
         signer_key,
         assets: asset_provider(&app),
         launcher: Arc::clone(launcher.inner()),
         browser: launch::configured_browser(crate::env::var),
     };
     run_blocking(context).await
+}
+
+/// Builds the self-test payload. `payloadHash` is the SHA-256 of the base64 XDR
+/// string, one of the two digests the page accepts (`app/src/bridge/verify.ts`);
+/// a wrong digest makes the page reject the round trip before Freighter is asked
+/// to sign. Split from the command so a test can drive it through that rule.
+fn selftest_payload(
+    xdr: String,
+    config: &stellar_config::StellarConfig,
+    owner: &str,
+) -> BridgePayload {
+    BridgePayload {
+        payload_hash: crate::approval::payload_hash_of_xdr(&xdr),
+        xdr,
+        network_passphrase: config.network_passphrase.clone(),
+        address: owner.to_string(),
+        summary: crate::types::TxSummary {
+            title: "Freighter signing test (no funds)".to_string(),
+            lines: vec![
+                "This transaction has sequence 0 and can never be submitted.".to_string(),
+            ],
+            explorer_url: None,
+            estimated_fee: "0.0000100 XLM".to_string(),
+        },
+    }
 }
 
 /// The self-test's hard safety rule: the envelope must belong to the configured
@@ -425,11 +444,11 @@ mod tests {
         }
     }
 
-    fn payload(xdr: &str) -> BridgePayload {
+    fn payload(address: &str, xdr: &str) -> BridgePayload {
         BridgePayload {
             xdr: xdr.to_string(),
             network_passphrase: PASSPHRASE.to_string(),
-            address: OWNER.to_string(),
+            address: address.to_string(),
             payload_hash: "hash".to_string(),
             summary: crate::types::TxSummary {
                 title: "Sign a testnet payment".to_string(),
@@ -437,6 +456,20 @@ mod tests {
                 explorer_url: None,
                 estimated_fee: "0.0000100 XLM".to_string(),
             },
+        }
+    }
+
+    /// A `StellarConfig` with the fixture passphrase and owner, for the tests
+    /// that build a payload without a Tauri app.
+    fn test_config() -> stellar_config::StellarConfig {
+        stellar_config::StellarConfig {
+            network: "testnet".to_string(),
+            rpc_url: "https://rpc".to_string(),
+            horizon_url: "https://horizon".to_string(),
+            network_passphrase: PASSPHRASE.to_string(),
+            owner_address: Some(OWNER.to_string()),
+            aliases: Default::default(),
+            guard_contract_id: None,
         }
     }
 
@@ -563,8 +596,9 @@ mod tests {
     fn happy_path_verifies_a_locally_signed_envelope() {
         let seed = [3u8; 32];
         let (public, xdr) = owned_fixture(seed);
+        let address = strkey::encode_public_key(&public);
         let context = RunContext {
-            payload: payload(&xdr),
+            payload: payload(&address, &xdr),
             signer_key: public,
             assets: Arc::new(FakeAssets),
             launcher: Arc::new(PageLauncher { seed, tamper: false }),
@@ -578,7 +612,7 @@ mod tests {
         let outcome = context.run();
         assert!(outcome.ok, "expected ok, got {outcome:?}");
         assert_eq!(outcome.tx_hash.as_deref(), Some(expected_hash.as_str()));
-        assert_eq!(outcome.signer_address.as_deref(), Some(OWNER));
+        assert_eq!(outcome.signer_address.as_deref(), Some(address.as_str()));
         assert!(outcome.signed_xdr.is_some());
     }
 
@@ -586,8 +620,9 @@ mod tests {
     fn a_tampered_signature_is_integrity_not_ok() {
         let seed = [4u8; 32];
         let (public, xdr) = owned_fixture(seed);
+        let address = strkey::encode_public_key(&public);
         let context = RunContext {
-            payload: payload(&xdr),
+            payload: payload(&address, &xdr),
             signer_key: public,
             assets: Arc::new(FakeAssets),
             launcher: Arc::new(PageLauncher { seed, tamper: true }),
@@ -603,9 +638,11 @@ mod tests {
         // The page signs with a different key than the payload's owner.
         let (_public, xdr) = owned_fixture([5u8; 32]);
         let owner_seed = [6u8; 32];
+        let owner_key = SigningKey::from_bytes(&owner_seed).verifying_key().to_bytes();
+        let address = strkey::encode_public_key(&owner_key);
         let context = RunContext {
-            payload: payload(&xdr),
-            signer_key: SigningKey::from_bytes(&owner_seed).verifying_key().to_bytes(),
+            payload: payload(&address, &xdr),
+            signer_key: owner_key,
             assets: Arc::new(FakeAssets),
             launcher: Arc::new(PageLauncher {
                 seed: [7u8; 32],
@@ -619,6 +656,26 @@ mod tests {
     }
 
     #[test]
+    fn a_reported_signer_address_that_is_not_the_owner_is_refused() {
+        // The page can only echo `payload.address`; this pins that Rust still
+        // decodes it and refuses one whose key is not the configured owner.
+        let seed = [8u8; 32];
+        let (public, xdr) = owned_fixture(seed);
+        let context = RunContext {
+            payload: payload(OWNER, &xdr),
+            signer_key: public,
+            assets: Arc::new(FakeAssets),
+            launcher: Arc::new(PageLauncher { seed, tamper: false }),
+            browser: None,
+        };
+        let outcome = context.finish(SessionOutcome::Success(PageResult::Success {
+            signed_xdr: "ignored".to_string(),
+            signer_address: OWNER.to_string(),
+        }));
+        assert_eq!(outcome.code.as_deref(), Some("address_mismatch"));
+    }
+
+    #[test]
     fn a_browser_launch_failure_is_an_error() {
         struct RefusingLauncher;
         impl BrowserLauncher for RefusingLauncher {
@@ -627,7 +684,7 @@ mod tests {
             }
         }
         let context = RunContext {
-            payload: payload(FIXTURE_XDR),
+            payload: payload(OWNER, FIXTURE_XDR),
             signer_key: OWNER_KEY,
             assets: Arc::new(FakeAssets),
             launcher: Arc::new(RefusingLauncher),
@@ -666,6 +723,26 @@ mod tests {
     }
 
     #[test]
+    fn the_selftest_payload_hash_passes_the_page_rule() {
+        // Regression for C1: the self-test once sent sha256(""), which the page
+        // rejects (`app/src/bridge/verify.ts:86-92`). Replicate that rule here so
+        // the payload can never drift from what the page accepts again.
+        let (_public, xdr) = owned_fixture([9u8; 32]);
+        let payload = selftest_payload(xdr.clone(), &test_config(), OWNER);
+        let tx_hash = {
+            let bytes = verify::decode_envelope(&xdr).unwrap();
+            let parsed = verify::parse_unsigned(&bytes).unwrap();
+            verify::tx_hash_hex(parsed.body, PASSPHRASE)
+        };
+        let sha256_of_xdr = crate::approval::payload_hash_of_xdr(&xdr);
+        assert!(
+            payload.payload_hash == tx_hash || payload.payload_hash == sha256_of_xdr,
+            "payload hash {} matched neither the tx hash nor sha256(xdr)",
+            payload.payload_hash
+        );
+    }
+
+    #[test]
     fn run_context_rejects_a_body_that_does_not_match_the_owner() {
         let assets: Arc<dyn AssetProvider> = Arc::new(FakeAssets);
         let released = crate::approval::AuthorizedPayload {
@@ -688,15 +765,7 @@ mod tests {
             },
             signer_hint: Some(vec![0xAA; 4]),
         };
-        let config = stellar_config::StellarConfig {
-            network: "testnet".to_string(),
-            rpc_url: "https://rpc".to_string(),
-            horizon_url: "https://horizon".to_string(),
-            network_passphrase: PASSPHRASE.to_string(),
-            owner_address: Some(OWNER.to_string()),
-            aliases: Default::default(),
-            guard_contract_id: None,
-        };
+        let config = test_config();
         let outcome = RunContext::from_authorized(
             released,
             &config,

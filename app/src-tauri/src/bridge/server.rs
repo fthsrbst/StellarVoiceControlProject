@@ -188,6 +188,17 @@ type ResolvedAsset = (Vec<u8>, String);
 /// The resolver closure behind [`AppAssetProvider`].
 type AssetLookup = Box<dyn Fn(&str) -> Option<ResolvedAsset> + Send + Sync>;
 
+/// Rejects an asset request path that could escape the asset root: a relative
+/// `..` component, a backslash, or a doubled slash (an absolute component). Both
+/// providers apply it *before* the underlying resolver is consulted, because
+/// Tauri's dev asset resolver joins the raw path without dropping `ParentDir`.
+fn is_safe_asset_path(path: &str) -> bool {
+    path.starts_with('/')
+        && !path.contains("..")
+        && !path.contains('\\')
+        && !path.contains("//")
+}
+
 /// A provider backed by an [`tauri::AssetResolver`](tauri::Manager::asset_resolver).
 pub struct AppAssetProvider {
     inner: AssetLookup,
@@ -213,6 +224,9 @@ impl AppAssetProvider {
 
 impl AssetProvider for AppAssetProvider {
     fn get(&self, path: &str) -> Option<ResolvedAsset> {
+        if !is_safe_asset_path(path) {
+            return None;
+        }
         (self.inner)(path)
     }
 }
@@ -230,18 +244,15 @@ impl DirAssetProvider {
 
 impl AssetProvider for DirAssetProvider {
     fn get(&self, path: &str) -> Option<ResolvedAsset> {
+        if !is_safe_asset_path(path) {
+            return None;
+        }
         let relative = match path {
             "/sign" | "/sign/" => "bridge.html",
             "/" => "index.html",
             other => other.trim_start_matches('/'),
         };
-        // Reject anything that is not a plain file name / nested path: no `..`,
-        // no absolute paths, no backslashes.
-        if relative.is_empty()
-            || relative.contains("..")
-            || relative.contains('\\')
-            || relative.starts_with('/')
-        {
+        if relative.is_empty() {
             return None;
         }
         let candidate = self.root.join(relative);
@@ -504,11 +515,10 @@ fn handle_request(
         {
             return respond_error(request, 413, "request body is too large");
         }
-        let body = match read_body(&mut request, MAX_BODY_BYTES) {
-            Some(body) => body,
-            None => {
-                return respond_error(request, 413, "request body is too large");
-            }
+        let body = match read_body(request.as_reader(), MAX_BODY_BYTES) {
+            Ok(Some(body)) => body,
+            Ok(None) => return respond_error(request, 413, "request body is too large"),
+            Err(_) => return respond_error(request, 400, "could not read the request body"),
         };
         let outcome = match serde_json::from_slice::<PageResult>(&body) {
             Ok(result) => outcome_from_page(result),
@@ -547,17 +557,17 @@ fn is_json_content_type(request: &tiny_http::Request) -> bool {
         .unwrap_or(false)
 }
 
-/// Reads at most `max` bytes; `None` when the body is larger.
-fn read_body(request: &mut tiny_http::Request, max: usize) -> Option<Vec<u8>> {
+/// Reads at most `max` bytes. `Ok(None)` means the body exceeded `max`; `Err`
+/// means the read itself failed. Callers answer `413` for the former and `400`
+/// for the latter, so a broken stream is never mistaken for an oversized body.
+fn read_body(reader: &mut dyn Read, max: usize) -> std::io::Result<Option<Vec<u8>>> {
     let mut body = Vec::new();
-    let mut limited = request.as_reader().take(max as u64 + 1);
-    if limited.read_to_end(&mut body).is_err() {
-        return None;
-    }
+    let mut limited = reader.take(max as u64 + 1);
+    limited.read_to_end(&mut body)?;
     if body.len() > max {
-        return None;
+        return Ok(None);
     }
-    Some(body)
+    Ok(Some(body))
 }
 
 /// The response headers every reply carries.
@@ -1172,6 +1182,56 @@ mod tests {
         assert!(provider.get("/../Cargo.toml").is_none());
         assert!(provider.get("/..%2FCargo.toml").is_none());
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn app_asset_provider_rejects_traversal_before_the_resolver() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        static CALLED: AtomicBool = AtomicBool::new(false);
+        let provider = AppAssetProvider {
+            inner: Box::new(|path: &str| {
+                CALLED.store(true, Ordering::SeqCst);
+                Some((path.as_bytes().to_vec(), "text/plain".to_string()))
+            }),
+        };
+        assert!(provider.get("/../../app/src-tauri/Cargo.toml").is_none());
+        assert!(
+            !CALLED.load(Ordering::SeqCst),
+            "the resolver must not be reached for a traversal path"
+        );
+        assert!(provider.get("/assets/bridge.js").is_some());
+    }
+
+    #[test]
+    fn safe_asset_path_rejects_traversal_and_absolute_components() {
+        assert!(is_safe_asset_path("/sign"));
+        assert!(is_safe_asset_path("/assets/bridge.js"));
+        assert!(!is_safe_asset_path(""));
+        assert!(!is_safe_asset_path("relative"));
+        assert!(!is_safe_asset_path("/../Cargo.toml"));
+        assert!(!is_safe_asset_path("/..%2FCargo.toml"));
+        assert!(!is_safe_asset_path("/foo/../../etc/passwd"));
+        assert!(!is_safe_asset_path("//etc/passwd"));
+        assert!(!is_safe_asset_path("/a\\b"));
+    }
+
+    #[test]
+    fn read_body_distinguishes_an_oversized_body_from_a_read_error() {
+        struct Failing;
+        impl Read for Failing {
+            fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("boom"))
+            }
+        }
+
+        let mut small: &[u8] = b"{}";
+        assert_eq!(read_body(&mut small, 8).unwrap(), Some(b"{}".to_vec()));
+
+        let mut big: &[u8] = &[b'a'; 9];
+        assert_eq!(read_body(&mut big, 8).unwrap(), None);
+
+        let mut failing = Failing;
+        assert!(read_body(&mut failing, 8).is_err());
     }
 
     /// The seed used by the server test's envelope signature.

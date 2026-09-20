@@ -161,3 +161,11 @@ fixture's SDK-computed `Transaction.hash()` is
 
 - Nothing was blocked. No files outside the assigned scope were touched; no
   secrets were read or printed; `POLARIS_ALLOW_AUTO_APPROVE` was not touched.
+
+## Review fixes (W4b-fix)
+
+- **C1 (BLOCKER):** `bridge_selftest` now sends `payload_hash_of_xdr(&xdr)` (sha256 of the base64 XDR, one of the two digests the page accepts, `app/src/bridge/verify.ts:86-92`) instead of sha256(""); `the_selftest_payload_hash_passes_the_page_rule` replicates that rule in Rust so it cannot regress.
+- **F1:** `verify_signed` returns a new `VerifyError::SourceMismatch` when `unsigned.source != key`, independent of the gate's `signerHint`; existing verify tests now use a source-matched fixture, plus `rejects_a_source_that_is_not_the_expected_key`.
+- **F2:** shared `is_safe_asset_path` rejects `..`, backslashes and doubled slashes before the resolver in both `AppAssetProvider` and `DirAssetProvider`; tested with a resolver that must not be reached.
+- **F3 + F4:** the page-supplied `signerAddress` is decoded and compared to the owner key (was a vacuous echo compare), and `read_body` now returns `io::Result<Option<..>>` so a read error is `400` rather than `413`; both tested.
+- Verified: `cargo test` 226 passed / 0 failed / 5 ignored (bridge 52, was 45); `cargo clippy --all-targets -- -D warnings` clean.
