@@ -16,9 +16,10 @@ use std::path::{Path, PathBuf};
 
 use crate::stt::SttError;
 
-/// Clips shorter than this are rejected without a network call. 300 ms is below
-/// any real command but above a modifier slip.
-pub const MIN_DURATION_MS: u64 = 300;
+/// Clips shorter than this are rejected without a network call. 700 ms is below
+/// any real command but above the sub-second clips where Whisper's decoder
+/// starts inventing text or echoing the prompt (F3-fix).
+pub const MIN_DURATION_MS: u64 = 700;
 
 /// Peak amplitude (of i16 full scale) treated as silence. ~1% is far above the
 /// idle noise of laptop microphones and far below normal speech, which peaks in

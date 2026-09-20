@@ -131,10 +131,14 @@ impl GroqTranscriber {
     /// from the environment.
     pub fn from_env() -> Self {
         let model = env::var("POLARIS_STT_MODEL").unwrap_or_else(|| DEFAULT_MODEL.to_string());
+        let language = env::var("POLARIS_STT_LANGUAGE");
         let mut transcriber =
-            Self::new(env::var("GROQ_API_KEY"), model, env::var("POLARIS_STT_LANGUAGE"));
+            Self::new(env::var("GROQ_API_KEY"), model, language.clone());
         let aliases = alias_names(env::var(ALIASES_ENV).as_deref());
-        transcriber.prompt = resolve_prompt(env::var(PROMPT_ENV).as_deref(), &aliases);
+        // F3-fix: the hint follows the language actually in use, so a forced
+        // language never sees the other language's words to echo back.
+        transcriber.prompt =
+            resolve_prompt(env::var(PROMPT_ENV).as_deref(), &aliases, language.as_deref());
         transcriber.allowed_languages =
             parse_allowed_languages(env::var(ALLOWED_LANGS_ENV).as_deref());
         transcriber
@@ -260,6 +264,14 @@ impl Transcriber for GroqTranscriber {
             return Err(SttError::MissingKey);
         }
         self.run(wav)
+    }
+
+    fn prompt(&self) -> Option<&str> {
+        self.prompt.as_deref()
+    }
+
+    fn forced_language(&self) -> Option<&str> {
+        self.language.as_deref()
     }
 }
 
