@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { Ellipsis } from "lucide-react";
 
 import { MORE_MENU, quitPolaris, openPanel, type MoreMenuEntry } from "@/lib/panels";
+import { playSfx } from "@/lib/sfx";
 
 function runEntry(entry: MoreMenuEntry): void {
   if ("quit" in entry) {
@@ -82,7 +83,14 @@ export function MoreMenu() {
               ref={index === 0 ? firstItemRef : undefined}
               type="button"
               role="menuitem"
+              // Hover only: opening the menu focuses the first item
+              // programmatically (the effect above), so an `onFocus` cue would
+              // chirp on every open with no pointer involved, and click-through
+              // focus restoration would repeat it. A pointer actually entering
+              // an item is the discovery moment this cue is for.
+              onMouseEnter={() => playSfx("hover")}
               onClick={() => {
+                playSfx("select");
                 setOpen(false);
                 runEntry(entry);
               }}
