@@ -1,107 +1,193 @@
 /**
- * Wallet page — balances, identity, quick stats and recent activity.
+ * Wallet page — balances, identity, aliases and recent activity.
  *
- * Mock balances (XLM + USDC), the truncated public key with a copy button,
- * a month-to-date spend-vs-budget strip (budget = the guard's monthly rule
- * budget) and a mini transaction list. All data comes from
- * `@/lib/mockData`.
+ * The notch's Wallet data comes from `useWalletData` (real `stellar_config` +
+ * Horizon reads); the markup, classes and layout are unchanged from the mock
+ * version. The XLM and asset balances, the truncated owner key with copy and
+ * explorer links, the alias book, the last five payments and the account states
+ * (loading / unconfigured / offline / not funded) are all rendered from that
+ * view model. `@/lib/mockData` is kept only for its two formatting helpers.
  */
 import { useState } from "react";
-import { ArrowDownLeft, ArrowUpRight, Check, Copy } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Check, Copy, ExternalLink, RefreshCw } from "lucide-react";
 
-import {
-  MOCK_WALLET,
-  formatTimestamp,
-  truncateKey,
-} from "@/lib/mockData";
+import { formatTimestamp, truncateKey } from "@/lib/mockData";
+import { useWalletData } from "@/notch/data/useWalletData";
+import committedAliases from "../../../../stellar/config/aliases.json";
 
 /** How long the copy button shows its confirmation before reverting. */
 const COPIED_MS = 1500;
 
-function spendPercent(spend: string, budget: string): number {
-  const spent = Number(spend.replace(/[$,]/g, ""));
-  const limit = Number(budget.replace(/[$,]/g, ""));
-  if (!Number.isFinite(spent) || !Number.isFinite(limit) || limit <= 0) return 0;
-  return Math.min(100, Math.round((spent / limit) * 100));
-}
-
 export function WalletPage() {
+  const wallet = useWalletData(committedAliases);
   const [copied, setCopied] = useState(false);
 
-  const copyKey = (): void => {
+  const copyKey = (text: string): void => {
     // Clipboard access is best-effort (the overlay window may not be focused);
     // the visual confirmation still plays so the affordance is honest.
-    void navigator.clipboard?.writeText(MOCK_WALLET.publicKey).catch(() => {});
+    void navigator.clipboard?.writeText(text).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), COPIED_MS);
   };
 
-  const percent = spendPercent(MOCK_WALLET.monthlySpendUsd, MOCK_WALLET.monthlyBudgetUsd);
+  const ownerAddress = wallet.ownerAddress;
+  const latest = wallet.latestTransaction;
+  const showTransactions = wallet.status === "ready";
 
   return (
     <div className="page-stack">
-      <div className="wallet-balances">
-        {MOCK_WALLET.assets.map((asset) => (
-          <div key={asset.code} className="wallet-asset">
-            <span className="wallet-asset-code">{asset.code}</span>
-            <span className="wallet-asset-balance">{asset.balance}</span>
-            <span className="wallet-asset-usd">{asset.usdValue}</span>
-          </div>
-        ))}
-      </div>
-
       <div className="wallet-key">
-        <span className="wallet-key-label">Public key</span>
-        <code className="wallet-key-value selectable">
-          {truncateKey(MOCK_WALLET.publicKey, 8, 8)}
-        </code>
+        <span className="wallet-key-label">Network</span>
+        <span className="wallet-key-value">{wallet.network}</span>
         <button
           type="button"
           className="page-icon-button"
-          onClick={copyKey}
-          aria-label={copied ? "Copied" : "Copy public key"}
+          onClick={wallet.refresh}
+          disabled={wallet.refreshing}
+          aria-label="Refresh wallet"
         >
-          {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+          <RefreshCw aria-hidden="true" />
         </button>
       </div>
 
-      <div className="wallet-budget">
-        <div className="wallet-budget-copy">
-          <span>Spent this month</span>
-          <span>
-            {MOCK_WALLET.monthlySpendUsd} of {MOCK_WALLET.monthlyBudgetUsd}
-          </span>
-        </div>
-        <div
-          className="wallet-budget-bar"
-          role="progressbar"
-          aria-valuenow={percent}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-label="Monthly spend vs budget"
-        >
-          <span style={{ width: `${percent}%` }} />
-        </div>
-      </div>
+      {wallet.status === "loading" || wallet.status === "unconfigured" ? (
+        <p className="wallet-key-label">{wallet.message}</p>
+      ) : null}
 
-      <ul className="page-list wallet-tx-list" aria-label="Recent transactions">
-        {MOCK_WALLET.transactions.map((tx) => (
-          <li key={tx.id} className="wallet-tx">
-            <span className={`wallet-tx-direction is-${tx.direction}`}>
-              {tx.direction === "in" ? (
-                <ArrowDownLeft aria-hidden="true" />
-              ) : (
-                <ArrowUpRight aria-hidden="true" />
-              )}
-            </span>
-            <span className="wallet-tx-main">
-              <span className="wallet-tx-summary">{tx.summary}</span>
-              <span className="wallet-tx-time">{formatTimestamp(tx.timestamp)}</span>
-            </span>
-            <span className={`wallet-tx-amount is-${tx.status}`}>{tx.amount}</span>
-          </li>
-        ))}
-      </ul>
+      {wallet.status === "offline" ? (
+        <div className="wallet-key">
+          <span className="wallet-key-label">{wallet.message}</span>
+          <button
+            type="button"
+            className="page-icon-button"
+            onClick={wallet.refresh}
+            disabled={wallet.refreshing}
+            aria-label="Retry"
+          >
+            <RefreshCw aria-hidden="true" />
+          </button>
+        </div>
+      ) : null}
+
+      {wallet.status === "unfunded" && wallet.friendbotUrl ? (
+        <a
+          className="wallet-key"
+          href={wallet.friendbotUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <span className="wallet-key-label">
+            Not funded on testnet — fund it with Friendbot
+          </span>
+          <ExternalLink aria-hidden="true" />
+        </a>
+      ) : null}
+
+      {ownerAddress ? (
+        <div className="wallet-key">
+          <span className="wallet-key-label">Public key</span>
+          <code className="wallet-key-value selectable" title={ownerAddress}>
+            {truncateKey(ownerAddress, 8, 8)}
+          </code>
+          <button
+            type="button"
+            className="page-icon-button"
+            onClick={() => copyKey(ownerAddress)}
+            aria-label={copied ? "Copied" : "Copy public key"}
+          >
+            {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+          </button>
+          {wallet.explorerUrl ? (
+            <a
+              className="page-icon-button"
+              href={wallet.explorerUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open account in explorer"
+            >
+              <ExternalLink aria-hidden="true" />
+            </a>
+          ) : null}
+        </div>
+      ) : null}
+
+      {latest ? (
+        <div className="wallet-key">
+          <span className="wallet-key-label">Latest transaction</span>
+          <code className="wallet-key-value selectable" title={latest.hash}>
+            {truncateKey(latest.hash, 8, 8)}
+          </code>
+          <a
+            className="page-icon-button"
+            href={latest.explorerUrl}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Open latest transaction in explorer"
+          >
+            <ExternalLink aria-hidden="true" />
+          </a>
+        </div>
+      ) : null}
+
+      {wallet.assets.length > 0 ? (
+        <div className="wallet-balances">
+          {wallet.assets.map((asset) => (
+            <div key={asset.code} className="wallet-asset">
+              <span className="wallet-asset-code">{asset.code}</span>
+              <span className="wallet-asset-balance">{asset.balance}</span>
+              <span className="wallet-asset-usd">{asset.note}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {wallet.aliases.length > 0 ? (
+        <ul className="page-list" aria-label="Alias book">
+          {wallet.aliases.map((alias) => (
+            <li key={alias.name} className="wallet-key">
+              <span className="wallet-key-label">{alias.name}</span>
+              <code className="wallet-key-value selectable" title={alias.address}>
+                {truncateKey(alias.address, 8, 8)}
+              </code>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      {showTransactions ? (
+        <>
+          {wallet.message ? <p className="wallet-key-label">{wallet.message}</p> : null}
+          <ul className="page-list wallet-tx-list" aria-label="Recent transactions">
+            {wallet.transactions.map((tx) => (
+              <li key={tx.id} className="wallet-tx">
+                <span className={`wallet-tx-direction is-${tx.direction}`}>
+                  {tx.direction === "in" ? (
+                    <ArrowDownLeft aria-hidden="true" />
+                  ) : (
+                    <ArrowUpRight aria-hidden="true" />
+                  )}
+                </span>
+                <span className="wallet-tx-main">
+                  <span className="wallet-tx-summary">{tx.summary}</span>
+                  <span className="wallet-tx-time">{formatTimestamp(tx.timestamp)}</span>
+                </span>
+                {tx.explorerUrl ? (
+                  <a
+                    className="wallet-tx-amount"
+                    href={tx.explorerUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {tx.amount}
+                  </a>
+                ) : (
+                  <span className={`wallet-tx-amount is-${tx.status}`}>{tx.amount}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
     </div>
   );
 }
