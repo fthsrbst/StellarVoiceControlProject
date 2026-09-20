@@ -15,6 +15,7 @@
 | 2026-09-19 | **A0 — harness**: global hotkey (press/release) + microphone capture to WAV + wire both into the existing log pane; delete the temporary `dev_self_test` command | Owner A | open | `backlog/2026-09-19-monorepo-skeleton.md` | P0 |
 | 2026-09-19 | Owner B: fill in `stellar/` (anchor SEP-10/38/6 client, `sendPayment` tool) — stubs throw `NotImplementedError` today | Owner B | open | `backlog/2026-09-19-monorepo-skeleton.md` | P0 |
 | 2026-09-19 | **TTS voice**: no professional Turkish voice on Fish Audio; decide spoken-output language. Also: expose a user-facing male/female voice choice (Sarah / Ethan) in a later milestone | Owner A | open | `backlog/2026-09-19-tts-voice-selection.md` | P1 |
+| 2026-09-20 | **W0 — Interactive panel windows**: Rust panel registry + `open_panel` command, menu-bar tray (Wallet… / Settings… / Quit), `panel-*` capability, hash routing + panel skeletons; tray/window behaviour still needs a human on a real Mac | Owner A (worker) | open | `backlog/w0-panel-windows.md` | P0 |
 
 ## Completed Tasks (Archive)
 

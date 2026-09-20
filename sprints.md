@@ -101,6 +101,15 @@
 - [ ] Approval card + Touch ID gate → signed → testnet tx (M2 slice complete).
 - **Accept:** "send 10 USDC to <alias>" end-to-end, Touch ID approved, tx visible on explorer.
 
+#### W0 — Interactive panel windows (UI infrastructure) ✅
+> Gives the click-through notch a real interaction surface and the frontend owner a
+> pattern to add panels without touching Rust. Report: `backlog/w0-panel-windows.md`.
+- [x] Rust panel registry (`app/src-tauri/src/panels.rs`): allow-list (`wallet`/`approval`/`settings`), `open_panel` command + `open` helper, typed `unknownPanel` rejection, one instance per label, close hides (not quits) (2026-09-20, branch `feat/w0-panel-windows`).
+- [x] Menu-bar tray (Wallet… / Settings… / Quit Polaris) using the bundled app icon; accessory activation policy unchanged (2026-09-20).
+- [x] `panel-*` capability (`capabilities/panels.json`); hash routing (`panelRoutes.ts`) + `PanelShell` + Wallet/Approval/Settings skeletons + `lib/panels.ts` wired to the existing event stream (2026-09-20).
+- [x] Tests: `parsePanelRoute` (app) + panel registry (Rust, no window); docs `docs/ui-panels.md` (2026-09-20).
+- **Accept:** `npm run check` / `npm test -w @polaris/app` / `npm run build -w @polaris/app` / `cargo test` / `cargo clippy -D warnings` green. Tray icon, focusable windows and close-keeps-app-alive are **unverified** — need a human on a real Mac (`backlog/w0-panel-windows.md`).
+
 ## Milestone 2b — Minimal Integration Slice (chain lane first) 🔲
 > Source: `backlog/2026-09-19-slice-gap-analysis.md` §G.3 (S1–S10), adapted to decisions D1/D2.
 > Integration between the UI lane and the chain lane is **paused until both sides are done**.
