@@ -1,8 +1,10 @@
-import { xdr } from "@stellar/stellar-sdk";
+import { scValToNative, xdr } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 
 import { createP2pClient } from "../client.ts";
+import { decodeOffer, normalizeOfferState } from "../describe.ts";
 import { P2pRefusal } from "../errors.ts";
+import type { Offer } from "../types.ts";
 import {
   BUYER,
   FakeP2pRpc,
@@ -116,6 +118,29 @@ describe("p2p client — reads decode contract values", () => {
     const offer = await makeClient(readRpc(offerScVal(OFFER))).getOffer(3n);
     expect(offer).toEqual(OFFER);
     expect(await makeClient(readRpc(xdr.ScVal.scvVoid())).getOffer(3n)).toBeNull();
+  });
+
+  it("decodes the real union-encoded state from a snapshot-shaped map", () => {
+    // `OfferState` is a `#[contracttype]` enum -> `scvVec([scvSymbol(name)])`,
+    // and `Option<Address>` -> void/address. This is the exact live shape.
+    const accepted: Offer = {
+      ...OFFER,
+      id: 1n,
+      state: "Accepted",
+      buyer: BUYER,
+      accepted_at: 1_700_000_000n,
+      pay_deadline: 1_700_001_800n,
+    };
+    const native = scValToNative(offerScVal(accepted)) as { state: unknown };
+    expect(native.state).toEqual(["Accepted"]);
+    expect(decodeOffer(native)).toEqual(accepted);
+  });
+
+  it("normalises a bare state symbol and rejects malformed states", () => {
+    expect(normalizeOfferState("Open")).toBe("Open");
+    expect(normalizeOfferState(["Settled"])).toBe("Settled");
+    expect(() => normalizeOfferState(["Open", "Accepted"])).toThrow(P2pRefusal);
+    expect(() => normalizeOfferState("Nope")).toThrow(P2pRefusal);
   });
 
   it("listOpen decodes a Vec<Offer> and an empty Vec to []", async () => {

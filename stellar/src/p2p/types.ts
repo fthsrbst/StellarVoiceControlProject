@@ -13,8 +13,14 @@
 import type { rpc as StellarRpc } from "@stellar/stellar-sdk";
 import type { ChainToolResult } from "@polaris/interfaces";
 
-/** The subset of `rpc.Server` the client uses; injected so tests script it. */
-export type P2pRpcLike = Pick<StellarRpc.Server, "getAccount" | "simulateTransaction">;
+/**
+ * The subset of `rpc.Server` the client uses; injected so tests script it.
+ * `getLatestLedger` is part of the shared `guard/invoke.ts` RPC surface.
+ */
+export type P2pRpcLike = Pick<
+  StellarRpc.Server,
+  "getAccount" | "simulateTransaction" | "getLatestLedger"
+>;
 
 /** The offer lifecycle state machine (contract enum). */
 export type OfferState = "Open" | "Accepted" | "Settled" | "Cancelled" | "Expired";

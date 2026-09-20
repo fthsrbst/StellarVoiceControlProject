@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { Intent } from "@polaris/interfaces";
 import type { Offer, P2pCall } from "@polaris/stellar";
@@ -14,6 +14,10 @@ import { useTxRun } from "@/lib/useTxRun";
 type Notice = { kind: "ok" | "error"; message: string; url?: string } | null;
 
 const TRADE_ACTIONS: readonly P2pAction[] = ["accept", "confirm", "cancel", "reclaim"];
+
+/** `list_open` clamps `limit` to its `MAX_PAGE` (20); pages advance by the window. */
+const P2P_PAGE_SIZE = 20;
+const FIRST_PAGE_START = 1n;
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -57,15 +61,25 @@ export function P2pPanel() {
   const [trackId, setTrackId] = useState("");
   const [owner, setOwner] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+  const pageStartRef = useRef(FIRST_PAGE_START);
   const { run } = useTxRun();
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (reset: boolean) => {
     setBusy(true);
     try {
       const ctx = await getP2pContext();
       setOwner(ctx.owner);
-      setOffers(await ctx.client.listOpen(0n, 50));
+      const start = reset ? FIRST_PAGE_START : pageStartRef.current;
+      const [next, page] = await Promise.all([
+        ctx.client.nextOfferId(),
+        ctx.client.listOpen(start, P2P_PAGE_SIZE),
+      ]);
+      const nextStart = start + BigInt(P2P_PAGE_SIZE);
+      pageStartRef.current = nextStart;
+      setHasMore(nextStart < next);
+      setOffers((prev) => dedupe(reset ? page : [...prev, ...page]));
       setNotice(null);
     } catch (error) {
       setNotice({ kind: "error", message: messageOf(error) });
@@ -75,7 +89,7 @@ export function P2pPanel() {
   }, []);
 
   useEffect(() => {
-    void load();
+    void load(true);
   }, [load]);
 
   const runCall = useCallback(
@@ -88,7 +102,7 @@ export function P2pPanel() {
         ]);
         if (outcome?.status === "submitted") {
           // Refresh first (it clears any stale error), then announce success.
-          await load();
+          await load(true);
           setNotice({ kind: "ok", message: `${label} submitted.`, url: outcome.explorerUrl });
         } else {
           setNotice({ kind: "error", message: outcome?.detail ?? "the transaction was not submitted" });
@@ -185,7 +199,7 @@ export function P2pPanel() {
 
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-xs font-semibold text-polaris-text">Offers</h2>
-          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void load()}>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => void load(true)}>
             {busy ? "Working…" : "Refresh"}
           </Button>
         </div>
@@ -198,6 +212,12 @@ export function P2pPanel() {
 
         <OfferSection title="My offers & trades" rows={mine} busy={busy} onAction={onAction} />
         <OfferSection title="Open offers from others" rows={others} busy={busy} onAction={onAction} />
+
+        {hasMore ? (
+          <Button variant="secondary" size="sm" disabled={busy} onClick={() => void load(false)}>
+            Load more offers
+          </Button>
+        ) : null}
 
         <div className="rounded-lg border border-polaris-line bg-polaris-panel/40 p-3">
           <p className="text-[11px] text-polaris-muted">Track an offer by id (for accepted or settled trades)</p>

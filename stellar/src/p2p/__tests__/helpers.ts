@@ -38,6 +38,10 @@ export class FakeP2pRpc {
     return new Account(address, "100");
   }
 
+  async getLatestLedger(): Promise<{ id: string; sequence: number; protocolVersion: number }> {
+    return { id: "1", sequence: 100, protocolVersion: 0 };
+  }
+
   async simulateTransaction(tx: Transaction): Promise<Any> {
     this.simulated.push(tx);
     const scripted = this.sims.length > 1 ? this.sims.shift() : this.sims[0];
@@ -90,7 +94,8 @@ export function offerScVal(offer: Offer): xdr.ScVal {
     mapEntry("pay_deadline", u64(offer.pay_deadline)),
     mapEntry("price_try_kurus", i128(offer.price_try_kurus)),
     mapEntry("seller", scAddress(offer.seller)),
-    mapEntry("state", xdr.ScVal.scvSymbol(offer.state)),
+    // The contract's `OfferState` is a union enum: `scvVec([scvSymbol(name)])`.
+    mapEntry("state", xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(offer.state)])),
     mapEntry("token", scAddress(offer.token)),
   ]);
 }

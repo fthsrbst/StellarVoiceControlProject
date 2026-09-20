@@ -15,6 +15,7 @@ import type { ChainTool, ChainToolResult } from "@polaris/interfaces";
 import type { Offer, P2pCall, P2pClient } from "@polaris/stellar";
 
 import { getStellarConfig } from "@/lib/stellarConfig";
+import { formatTokenAmount } from "@/lib/p2pView";
 
 /** Error shape the execution seam recognises as a missing-config refusal. */
 function notConfigured(message: string): Error & { code: "not_configured" } {
@@ -95,6 +96,24 @@ export async function createP2pOfferCall(
 /** The five write builders the panel can trigger, minus `create_offer`. */
 export type P2pTradeAction = "accept" | "confirm" | "cancel" | "reclaim";
 
+/** Prepends the offer's display terms to a call summary (display labels only). */
+function withTerms(call: P2pCall, terms: string[]): P2pCall {
+  return { ...call, summary: { ...call.summary, lines: [...terms, ...call.summary.lines] } };
+}
+
+/**
+ * The offer's terms for the approval card, so a misheard/hallucinated offer id
+ * is not approved blind. The signed payload is still the decoded XDR; these are
+ * display labels.
+ */
+async function acceptTerms(offer: Offer): Promise<string[]> {
+  const { p2p } = await import("@polaris/stellar");
+  return [
+    `Take offer #${offer.id}: ${formatTokenAmount(offer.amount)} tokens for ${p2p.kurusToTry(offer.price_try_kurus)} TRY`,
+    `Seller: ${offer.seller}`,
+  ];
+}
+
 /** Builds the unsigned call for the next action on an offer. */
 export async function buildP2pActionCall(
   action: P2pTradeAction,
@@ -103,7 +122,7 @@ export async function buildP2pActionCall(
   const { client, owner } = await getP2pContext();
   switch (action) {
     case "accept":
-      return client.accept(owner, offer.id);
+      return withTerms(await client.accept(owner, offer.id), await acceptTerms(offer));
     case "confirm":
       return client.confirmFiat(owner, offer.id);
     case "cancel":
@@ -133,10 +152,16 @@ export const p2pOfferTool: ChainTool = async (intent) => {
   return asToolResult(await createP2pOfferCall(intent.asset, intent.amount, intent.priceTry));
 };
 
-/** Voice tool: "take offer 3". */
+/** Voice tool: "take offer 3". Fetches the terms so the card shows what is taken. */
 export const p2pAcceptTool: ChainTool = async (intent) => {
   const { client, owner } = await getP2pContext();
-  return asToolResult(await client.accept(owner, BigInt(requireOfferId(intent))));
+  const offerId = BigInt(requireOfferId(intent));
+  const offer = await client.getOffer(offerId);
+  if (!offer) {
+    throw new Error(`offer #${offerId} was not found`);
+  }
+  const call = await client.accept(owner, offerId);
+  return asToolResult(withTerms(call, await acceptTerms(offer)));
 };
 
 /** Voice tool: "confirm payment received on offer 3". */

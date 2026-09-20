@@ -9,7 +9,7 @@ import {
   formatRate,
   formatTokenAmount,
   formatTry,
-  nextAction,
+  nextActions,
   offerView,
   roleOf,
   shortAddress,
@@ -57,20 +57,28 @@ test("role is seller, buyer or other", () => {
 });
 
 test("an open offer: seller may cancel, anyone else may accept", () => {
-  assert.equal(nextAction(offer({ state: "Open" }), OWNER, 1), "cancel");
-  assert.equal(nextAction(offer({ state: "Open" }), OTHER, 1), "accept");
+  assert.deepEqual(nextActions(offer({ state: "Open" }), OWNER, 1), ["cancel"]);
+  assert.deepEqual(nextActions(offer({ state: "Open" }), OTHER, 1), ["accept"]);
 });
 
-test("an accepted offer: seller confirms before the deadline, reclaims after", () => {
+test("an expired open offer offers no accept and only reclaim to the seller", () => {
+  const expired = offer({ state: "Open", expires_at: 1_000n });
+  assert.deepEqual(nextActions(expired, OTHER, 1_000), []);
+  assert.deepEqual(nextActions(expired, OWNER, 1_000), ["reclaim"]);
+});
+
+test("an accepted offer: seller confirms, and after the deadline may also reclaim", () => {
   const accepted = offer({ state: "Accepted", buyer: OTHER, pay_deadline: 2_000n });
-  assert.equal(nextAction(accepted, OWNER, 1_500), "confirm");
-  assert.equal(nextAction(accepted, OWNER, 2_000), "reclaim");
-  assert.equal(nextAction(accepted, OTHER, 1_500), "wait");
+  assert.deepEqual(nextActions(accepted, OWNER, 1_500), ["confirm"]);
+  // At exactly the deadline reclaim is still rejected by the contract (strict >).
+  assert.deepEqual(nextActions(accepted, OWNER, 2_000), ["confirm"]);
+  assert.deepEqual(nextActions(accepted, OWNER, 2_001), ["confirm", "reclaim"]);
+  assert.deepEqual(nextActions(accepted, OTHER, 1_500), ["wait"]);
 });
 
 test("settled, cancelled and expired offers offer no action", () => {
   for (const state of ["Settled", "Cancelled", "Expired"] as const) {
-    assert.equal(nextAction(offer({ state }), OWNER, 1), "none");
+    assert.deepEqual(nextActions(offer({ state }), OWNER, 1), []);
   }
 });
 
@@ -87,6 +95,6 @@ test("offerView assembles the row and resolves the seller label", () => {
   assert.equal(view.rate, "34 TRY/token");
   assert.equal(view.sellerLabel, shortAddress(OWNER));
   assert.equal(view.role, "seller");
-  assert.equal(view.next, "cancel");
+  assert.deepEqual(view.actions, ["cancel"]);
   assert.equal(view.expiresIn, "1d 0h");
 });
