@@ -30,6 +30,7 @@ import type { ExecutionOutcome } from "@polaris/agent";
 import { submitSignedTx, type SubmitResult } from "@polaris/stellar";
 
 import type { InvokeFn } from "./approval.ts";
+import { webLog } from "./weblog.ts";
 
 /** The Rust `bridge_sign` success shape (`BridgeOutcome` camelCase). */
 export interface BridgeSigned {
@@ -94,6 +95,9 @@ function submissionLabel(message: string): string {
   if (/tx_bad_seq/i.test(message)) return "Transaction expired";
   if (/op_underfunded|insufficient|underfunded/i.test(message)) return "Not enough balance";
   if (/tx_too_late/i.test(message)) return "Transaction expired";
+  if (/network|fetch|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|timed? ?out|offline/i.test(message)) {
+    return "Network unreachable";
+  }
   return "Submit failed";
 }
 
@@ -189,5 +193,6 @@ export async function signAndSubmit(
 
 /** Builds a labelled failure that keeps the executed result for diagnostics. */
 function fail(outcome: ExecutionOutcome, label: string, detail: string): SubmittedOutcome {
+  webLog("error", `signing ${label}: ${detail}`, true);
   return { status: "failed", intent: outcome.intent, label, detail, result: outcome.result };
 }
