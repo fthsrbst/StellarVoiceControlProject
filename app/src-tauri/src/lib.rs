@@ -20,6 +20,7 @@ mod stt;
 mod timing;
 mod tts;
 mod types;
+mod voice_health;
 
 use tauri::Manager;
 
@@ -50,6 +51,7 @@ pub fn run() {
             notch::notch_window_flags,
             hotkey::hotkey_permission,
             panels::open_panel,
+            voice_health::voice_health,
         ])
         // Step W0: a panel's close button hides it instead of quitting the app
         // (the overlay's `main` window is never closed, so the close handler is
@@ -148,14 +150,15 @@ fn apply_activation_policy(_app: &mut tauri::App) {}
 /// Tray menu item ids. `MenuEvent::id()` comes back as these exact strings.
 const TRAY_MENU_WALLET: &str = "wallet";
 const TRAY_MENU_SETTINGS: &str = "settings";
+const TRAY_MENU_DEBUG: &str = "debug";
 const TRAY_MENU_QUIT: &str = "quit";
 
 /// Step W0: builds the menu-bar status item.
 ///
-/// "Wallet…" and "Settings…" open their panels through the same registry the
-/// `open_panel` command uses, so the tray and the frontend cannot drift;
-/// "Quit Polaris" exits. The approval panel is deliberately absent: it is opened
-/// by the approval flow, never by hand.
+/// "Wallet…", "Settings…" and "Debug…" open their panels through the same
+/// registry the `open_panel` command uses, so the tray and the frontend cannot
+/// drift; "Quit Polaris" exits. The approval panel is deliberately absent: it is
+/// opened by the approval flow, never by hand.
 ///
 /// The icon is the bundled app icon (`tauri-build` embeds it), so the tray needs
 /// no second asset. It is not marked as a template image because the app icon is
@@ -167,6 +170,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     let menu = MenuBuilder::new(app)
         .text(TRAY_MENU_WALLET, "Wallet…")
         .text(TRAY_MENU_SETTINGS, "Settings…")
+        .text(TRAY_MENU_DEBUG, "Debug…")
         .separator()
         .text(TRAY_MENU_QUIT, "Quit Polaris")
         .build()?;
@@ -193,6 +197,11 @@ fn handle_tray_menu(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
         }
         TRAY_MENU_SETTINGS => {
             if let Err(error) = panels::open(app, panels::SETTINGS) {
+                eprintln!("polaris: {error}");
+            }
+        }
+        TRAY_MENU_DEBUG => {
+            if let Err(error) = panels::open(app, panels::DEBUG) {
                 eprintln!("polaris: {error}");
             }
         }
