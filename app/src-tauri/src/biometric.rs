@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(target_os = "macos")]
-use block2::StackBlock;
+use block2::RcBlock;
 #[cfg(target_os = "macos")]
 use objc2::rc::Retained;
 #[cfg(target_os = "macos")]
@@ -115,14 +115,15 @@ pub fn system() -> Arc<dyn Authenticator> {
     Arc::new(SystemAuthenticator)
 }
 
-/// Collapses whitespace, neutralises control characters and truncates `reason`
-/// to [`MAX_REASON_CHARS`]. A model-provided summary must never be able to put a
-/// newline or an unbounded string into the system prompt.
+/// Collapses whitespace, neutralises control and bidi/zero-width characters,
+/// and truncates `reason` to [`MAX_REASON_CHARS`]. A model-provided summary must
+/// never be able to put a newline, an invisible bidi override or an unbounded
+/// string into the system prompt.
 pub fn sanitize_reason(reason: &str) -> String {
     let cleaned: String = reason
         .chars()
         .map(|character| {
-            if character.is_control() {
+            if is_unsafe_for_prompt(character) {
                 ' '
             } else {
                 character
@@ -136,6 +137,17 @@ pub fn sanitize_reason(reason: &str) -> String {
     } else {
         truncated
     }
+}
+
+/// Control characters plus the invisible formatting characters a hostile summary
+/// could use to spoof the prompt: zero-width spaces/joiners, bidi marks,
+/// embeddings, overrides and isolates, and the BOM.
+fn is_unsafe_for_prompt(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}'
+        )
 }
 
 /// Which biometry this Mac supports, if any. Used by the Debug panel's health
@@ -179,12 +191,13 @@ fn evaluate(reason: String) -> Result<(), AuthError> {
     // SAFETY: `LAContext` may be created and used from any thread and shows no
     // UI until `evaluatePolicy`. The context is kept alive across the receive
     // below (it is only dropped after the result resolves), and the reply block
-    // only forwards the outcome over the channel; the framework copies the block
-    // because it calls it asynchronously.
+    // only forwards the outcome over the channel. `RcBlock` keeps the block
+    // alive for as long as the framework holds a reference, so no lifetime
+    // assumption about an asynchronous call is required.
     let context: Retained<LAContext> = unsafe {
         let context = LAContext::new();
         let reason = NSString::from_str(&reason);
-        let handler = StackBlock::new(move |success: Bool, error: *mut NSError| {
+        let handler = RcBlock::new(move |success: Bool, error: *mut NSError| {
             let outcome = if success.as_bool() {
                 Ok(())
             } else {
@@ -320,6 +333,17 @@ mod tests {
             sanitize_reason("Approve\n\tpayment   of 10 XLM"),
             "Approve payment of 10 XLM"
         );
+    }
+
+    #[test]
+    fn bidi_and_zero_width_characters_are_stripped() {
+        // A right-to-left override (U+202E) plus a zero-width space (U+200B)
+        // must not survive into the system prompt.
+        assert_eq!(
+            sanitize_reason("Approve\u{202E} payment\u{200B} of 10 XLM"),
+            "Approve payment of 10 XLM"
+        );
+        assert_eq!(sanitize_reason("\u{200B}\u{2066}\u{FEFF}"), DEFAULT_REASON);
     }
 
     #[test]

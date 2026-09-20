@@ -18,10 +18,16 @@
 //! `payloadHash` is the lowercase hex SHA-256 of the UTF-8 bytes of the base64
 //! `unsignedXdr` string — a digest of the exact blob that will be released. It is
 //! deliberately **not** the Stellar transaction hash (that needs XDR parsing and
-//! a network passphrase); it is the same definition the agent uses
-//! (`payloadHashOfXdr` in `agent/src/execution.ts`). `begin` rejects a request
-//! whose hash does not match, so a compromised webview cannot get the gate to
-//! authorize a different blob than the one it showed.
+//! a network passphrase). `begin` rejects a request whose hash does not match the
+//! blob it carries, so a compromised webview cannot get the gate to release a
+//! different blob than the one whose hash it supplied.
+//!
+//! The hash binds the **XDR only**. The user-facing `summary` and `intent` are
+//! webview-supplied metadata and are **not** cryptographically bound to the blob:
+//! a caller can pair a benign summary with a malicious XDR as long as it supplies
+//! that XDR's hash. What the user compares on the card is the hash fingerprint
+//! (W2); only Rust-side XDR decoding (W4/W5) or an out-of-band hash check closes
+//! that gap.
 //!
 //! ## Where XDR leaves
 //!
@@ -55,12 +61,10 @@ pub const SUPERSEDED_REASON: &str = "superseded";
 /// The reason recorded when the user (or the panel) denies a request.
 pub const DENIED_REASON: &str = "denied by user";
 
-/// The `origin` value an anchor flow must carry to use `WalletOnly` mode. This is
-/// a placeholder: see `TODO(W5)` on [`ApprovalStore::begin`].
-pub const ANCHOR_ORIGIN: &str = "anchor";
-
 /// Lowercase hex SHA-256 of the UTF-8 bytes of the base64 XDR string. This is
-/// the binding the whole gate rests on; it matches `payloadHashOfXdr` (W1).
+/// the binding the whole gate rests on: base64 XDR strings are hashed as their
+/// UTF-8 bytes (the agent's `payloadHashOfXdr` on the W1 branch uses the same
+/// definition, but that function is not on this branch).
 pub fn payload_hash_of_xdr(unsigned_xdr: &str) -> String {
     let digest = Sha256::digest(unsigned_xdr.as_bytes());
     hex::encode(digest)
@@ -116,7 +120,9 @@ pub struct ApprovalRequest {
     pub intent: Intent,
     #[serde(default)]
     pub mode: ApprovalMode,
-    /// Anchor-flow marker. Only meaningful (and only required) for `WalletOnly`.
+    /// Reserved for the anchor flow (W5). It is **not** an authorization signal:
+    /// `begin` rejects `WalletOnly` regardless of this field, and only the
+    /// in-process [`ApprovalStore::begin_wallet_only`] can create such a request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<String>,
 }
@@ -173,6 +179,9 @@ pub enum AuthorizeError {
     NotPending { state: ApprovalState },
     Expired,
     Busy,
+    /// A `WalletOnly` request cannot be authorized from the webview; only the
+    /// in-process Rust anchor path (W5) may do that.
+    WalletOnly,
 }
 
 /// Why a denial could not be recorded.
@@ -192,15 +201,6 @@ pub enum TakeError {
 }
 
 impl BeginError {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::EmptyXdr => "Empty XDR",
-            Self::OversizedXdr { .. } => "XDR too large",
-            Self::HashMismatch => "Bad hash",
-            Self::WalletOnlyNotAllowed => "Wallet only",
-        }
-    }
-
     pub fn detail(&self) -> String {
         match self {
             Self::EmptyXdr => "the approval request carried no unsigned XDR".to_string(),
@@ -209,22 +209,13 @@ impl BeginError {
             }
             Self::HashMismatch => "the payload hash does not match the unsigned XDR".to_string(),
             Self::WalletOnlyNotAllowed => {
-                "wallet-only approval is reserved for anchor flows (origin \"anchor\")".to_string()
+                "wallet-only approval is not available from the webview".to_string()
             }
         }
     }
 }
 
 impl AuthorizeError {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::NotFound => "No request",
-            Self::NotPending { .. } => "Not pending",
-            Self::Expired => "Expired",
-            Self::Busy => "In progress",
-        }
-    }
-
     pub fn detail(&self) -> String {
         match self {
             Self::NotFound => "there is no approval request with that id".to_string(),
@@ -236,19 +227,14 @@ impl AuthorizeError {
             }
             Self::Expired => "the approval request expired before it was authorized".to_string(),
             Self::Busy => "an approval prompt is already open for this request".to_string(),
+            Self::WalletOnly => {
+                "wallet-only approvals cannot be authorized from the webview".to_string()
+            }
         }
     }
 }
 
 impl DenyError {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::NotFound => "No request",
-            Self::NotPending { .. } => "Not pending",
-            Self::Expired => "Expired",
-        }
-    }
-
     pub fn detail(&self) -> String {
         match self {
             Self::NotFound => "there is no approval request with that id".to_string(),
@@ -319,9 +305,57 @@ struct Entry {
     reason: Option<String>,
 }
 
+/// Normalises a request whose TTL has elapsed to `Expired`. Terminal states are
+/// left as they are.
+fn expire_if_due(entry: &mut Entry, now: Instant) {
+    if matches!(
+        entry.state,
+        ApprovalState::Pending | ApprovalState::Authorized
+    ) && now >= entry.expires_at
+    {
+        entry.state = ApprovalState::Expired;
+    }
+}
+
+/// Builds the webview snapshot for an entry. Never includes the unsigned XDR.
+fn snapshot_of_entry(entry: &Entry, expires_at_ms: u64) -> ApprovalSnapshot {
+    ApprovalSnapshot {
+        id: entry.request.id.clone(),
+        payload_hash: entry.request.payload_hash.clone(),
+        summary: entry.request.summary.clone(),
+        intent: entry.request.intent.clone(),
+        mode: entry.request.mode,
+        state: entry.state,
+        expires_at_ms,
+    }
+}
+
 struct StoreInner {
     next_id: u64,
     current: Option<Entry>,
+}
+
+/// Clears an entry's `in_flight` latch when dropped, so a panic (or any early
+/// exit) inside the blocking authenticator cannot leave the request stuck
+/// `Busy` forever. `finish_authorize` normally clears the latch first; clearing
+/// it twice is harmless.
+struct InFlightGuard {
+    inner: Arc<Mutex<StoreInner>>,
+    id: String,
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(entry) = inner.current.as_mut() {
+            if entry.request.id == self.id {
+                entry.in_flight = false;
+            }
+        }
+    }
 }
 
 /// The managed pending-approval store. Cheap to clone; all clones share state.
@@ -372,17 +406,49 @@ impl ApprovalStore {
     /// Registers a new pending request, superseding the previous one.
     ///
     /// Validation is fail-closed: an empty or oversized XDR, a hash that does not
-    /// match it, or a `WalletOnly` request without the anchor marker is rejected
-    /// and nothing is stored. On success the previous request (if it was still
-    /// `Pending` or `Authorized`) becomes `Denied` with
-    /// [`SUPERSEDED_REASON`], and its payload hash is returned so the caller can
-    /// emit the matching `approval_result`.
+    /// match it, or a `WalletOnly` mode is rejected and nothing is stored. On
+    /// success the previous request (if it was still `Pending` or `Authorized`)
+    /// becomes `Denied` with [`SUPERSEDED_REASON`], and its payload hash is
+    /// returned so the caller can emit the matching `approval_result`.
+    pub fn begin(&self, request: ApprovalRequest) -> Result<BeginOutcome, BeginError> {
+        self.store_request(request, false)
+    }
+
+    /// Creates a `WalletOnly` request **in process** — the only way such a
+    /// request can exist. [`ApprovalStore::begin`] (the webview command) rejects
+    /// `WalletOnly` unconditionally, so no webview call can reach this mode.
     ///
-    // TODO(W5): the `origin: "anchor"` check is a placeholder — the webview can
-    // forge that string. The anchor milestone must bind wallet-only mode to a
-    // Rust-verifiable signal (e.g. a SEP-10 challenge with sequence number 0)
-    // instead of trusting a caller-supplied field.
-    pub fn begin(&self, mut request: ApprovalRequest) -> Result<BeginOutcome, BeginError> {
+    /// This is deliberately an inherent `pub(crate)` method, not a free function:
+    /// it can never be registered with `tauri::generate_handler!`, which accepts
+    /// free functions only. Its only intended caller is the anchor milestone
+    /// (W5), and only after W5 has verified the anchor payload on the Rust side
+    /// (e.g. a SEP-10 challenge with sequence number 0). Until then nothing calls
+    /// it.
+    ///
+    /// The resulting request is still not webview-authorizable:
+    /// [`ApprovalStore::authorize_with`] refuses `WalletOnly`, so no webview call
+    /// can flip it to `Authorized` without a real gesture.
+    ///
+    // TODO(W5): land the Rust-side anchor check before any `WalletOnly` request
+    // is released; W4b must not enable `WalletOnly`.
+    #[allow(dead_code)]
+    pub(crate) fn begin_wallet_only(
+        &self,
+        mut request: ApprovalRequest,
+    ) -> Result<BeginOutcome, BeginError> {
+        request.mode = ApprovalMode::WalletOnly;
+        self.store_request(request, true)
+    }
+
+    /// Shared validation + storage behind [`ApprovalStore::begin`] and
+    /// [`ApprovalStore::begin_wallet_only`]. `allow_wallet_only` is the one
+    /// difference between the webview path (always false) and the in-process
+    /// anchor path (true).
+    fn store_request(
+        &self,
+        mut request: ApprovalRequest,
+        allow_wallet_only: bool,
+    ) -> Result<BeginOutcome, BeginError> {
         if request.unsigned_xdr.is_empty() {
             return Err(BeginError::EmptyXdr);
         }
@@ -396,9 +462,7 @@ impl ApprovalStore {
         if request.payload_hash != payload_hash_of_xdr(&request.unsigned_xdr) {
             return Err(BeginError::HashMismatch);
         }
-        if request.mode == ApprovalMode::WalletOnly
-            && request.origin.as_deref() != Some(ANCHOR_ORIGIN)
-        {
+        if request.mode == ApprovalMode::WalletOnly && !allow_wallet_only {
             return Err(BeginError::WalletOnlyNotAllowed);
         }
 
@@ -438,8 +502,12 @@ impl ApprovalStore {
         })
     }
 
-    /// Locks in a fresh `authorize_with` and returns the plan for the prompt.
-    fn prepare_authorize(&self, id: &str) -> Result<AuthorizePlan, AuthorizeError> {
+    /// Locks in a fresh `authorize_with` and returns the plan for the prompt
+    /// plus the guard that releases the latch on drop.
+    fn prepare_authorize(
+        &self,
+        id: &str,
+    ) -> Result<(AuthorizePlan, InFlightGuard), AuthorizeError> {
         let now = self.now();
         let mut inner = self.lock();
         let entry = inner.current.as_mut().ok_or(AuthorizeError::NotFound)?;
@@ -457,10 +525,16 @@ impl ApprovalStore {
             return Err(AuthorizeError::Busy);
         }
         entry.in_flight = true;
-        Ok(AuthorizePlan {
+        let plan = AuthorizePlan {
             mode: entry.request.mode,
             reason: format!("Approve {}", entry.request.summary.title),
-        })
+        };
+        drop(inner);
+        let guard = InFlightGuard {
+            inner: Arc::clone(&self.inner),
+            id: id.to_string(),
+        };
+        Ok((plan, guard))
     }
 
     /// Records the decision for a prepared request. `approved == false` releases
@@ -509,9 +583,15 @@ impl ApprovalStore {
         id: &str,
         authenticator: &dyn Authenticator,
     ) -> Result<String, AuthorizeFailure> {
-        let plan = self.prepare_authorize(id)?;
+        let (plan, _guard) = self.prepare_authorize(id)?;
         let approved = match plan.mode {
-            ApprovalMode::WalletOnly => true,
+            ApprovalMode::WalletOnly => {
+                // A `WalletOnly` request exists only via the in-process anchor
+                // API; the webview must not be able to authorize it. The guard
+                // releases `in_flight` on drop.
+                let _ = self.finish_authorize(id, false);
+                return Err(AuthorizeFailure::Store(AuthorizeError::WalletOnly));
+            }
             ApprovalMode::TouchId => match authenticator.authenticate(&plan.reason) {
                 Ok(()) => true,
                 Err(error) => {
@@ -555,19 +635,28 @@ impl ApprovalStore {
         if entry.request.id != id {
             return None;
         }
-        if entry.state == ApprovalState::Expired
-            || (matches!(
-                entry.state,
-                ApprovalState::Pending | ApprovalState::Authorized
-            ) && now >= entry.expires_at)
-        {
-            entry.state = ApprovalState::Expired;
-        }
+        expire_if_due(entry, now);
         Some(ApprovalStatus {
             id: entry.request.id.clone(),
             state: entry.state,
             reason: entry.reason.clone(),
         })
+    }
+
+    /// The current request by id with its state normalised, or `None` if the id
+    /// is unknown. Unlike [`ApprovalStore::current`] this also returns terminal
+    /// states (`Denied`/`Expired`), so the authorize/deny commands can hand the
+    /// card the snapshot it just produced. Never includes the unsigned XDR.
+    fn snapshot_of(&self, id: &str) -> Option<ApprovalSnapshot> {
+        let now = self.now();
+        let mut inner = self.lock();
+        let entry = inner.current.as_mut()?;
+        if entry.request.id != id {
+            return None;
+        }
+        expire_if_due(entry, now);
+        let expires_at_ms = self.epoch_ms_of(entry.expires_at);
+        Some(snapshot_of_entry(entry, expires_at_ms))
     }
 
     /// The snapshot the panel hydrates from, or `None` when there is nothing
@@ -576,30 +665,15 @@ impl ApprovalStore {
         let now = self.now();
         let mut inner = self.lock();
         let entry = inner.current.as_mut()?;
-        if entry.state == ApprovalState::Expired
-            || (matches!(
-                entry.state,
-                ApprovalState::Pending | ApprovalState::Authorized
-            ) && now >= entry.expires_at)
-        {
-            entry.state = ApprovalState::Expired;
-            return None;
-        }
+        expire_if_due(entry, now);
         if !matches!(
             entry.state,
             ApprovalState::Pending | ApprovalState::Authorized
         ) {
             return None;
         }
-        Some(ApprovalSnapshot {
-            id: entry.request.id.clone(),
-            payload_hash: entry.request.payload_hash.clone(),
-            summary: entry.request.summary.clone(),
-            intent: entry.request.intent.clone(),
-            mode: entry.request.mode,
-            state: entry.state,
-            expires_at_ms: self.epoch_ms_of(entry.expires_at),
-        })
+        let expires_at_ms = self.epoch_ms_of(entry.expires_at);
+        Some(snapshot_of_entry(entry, expires_at_ms))
     }
 
     /// Releases the unsigned XDR, **once**.
@@ -639,39 +713,88 @@ impl Default for ApprovalStore {
     }
 }
 
-/// The command-level failure shape, mirroring `SpeechFailure`: a short UI label
-/// plus the full terminal detail.
+/// The typed failure union every approval command rejects with. It mirrors
+/// `ApprovalCommandError` in `interfaces/src/index.ts` and the W2 approval-card
+/// client (`app/src/lib/approval.ts`): a stable, machine-readable `kind` plus a
+/// human-readable `message`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ApprovalFailure {
-    pub label: String,
-    pub detail: String,
+pub struct ApprovalCommandError {
+    pub kind: ApprovalErrorKind,
+    pub message: String,
 }
 
-impl From<BeginError> for ApprovalFailure {
+/// The contract's failure categories. The webview maps gate errors onto exactly
+/// these, so the card can branch on `kind` without parsing `message`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ApprovalErrorKind {
+    /// The user dismissed the Touch ID prompt.
+    Cancelled,
+    /// Anything that is not a clean cancel or a known gate state.
+    Failed,
+    /// No biometry / passcode available to evaluate the policy.
+    Unavailable,
+    /// The prompt did not answer within the auth timeout.
+    Timeout,
+    /// The request's TTL elapsed.
+    Expired,
+    /// The request is unknown or no longer in the state the call needs.
+    NotPending,
+}
+
+impl ApprovalCommandError {
+    fn new(kind: ApprovalErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+}
+
+impl From<BeginError> for ApprovalCommandError {
     fn from(error: BeginError) -> Self {
-        Self {
-            label: error.label().to_string(),
-            detail: error.detail(),
-        }
+        // Every `begin` rejection is a fail-closed "failed": nothing was
+        // registered. The detail is preserved in `message`.
+        Self::new(ApprovalErrorKind::Failed, error.detail())
     }
 }
 
-impl From<DenyError> for ApprovalFailure {
+impl From<DenyError> for ApprovalCommandError {
     fn from(error: DenyError) -> Self {
-        Self {
-            label: error.label().to_string(),
-            detail: error.detail(),
-        }
+        let kind = match &error {
+            DenyError::Expired => ApprovalErrorKind::Expired,
+            DenyError::NotFound | DenyError::NotPending { .. } => ApprovalErrorKind::NotPending,
+        };
+        Self::new(kind, error.detail())
     }
 }
 
-impl From<AuthError> for ApprovalFailure {
+impl From<AuthorizeError> for ApprovalCommandError {
+    fn from(error: AuthorizeError) -> Self {
+        let kind = match &error {
+            AuthorizeError::Expired => ApprovalErrorKind::Expired,
+            AuthorizeError::NotFound | AuthorizeError::NotPending { .. } => {
+                ApprovalErrorKind::NotPending
+            }
+            // `Busy` and a webview attempt at `WalletOnly` are transient /
+            // internal conditions with no dedicated kind; `failed` is the
+            // fail-closed bucket, never mistaken for a benign state.
+            AuthorizeError::Busy | AuthorizeError::WalletOnly => ApprovalErrorKind::Failed,
+        };
+        Self::new(kind, error.detail())
+    }
+}
+
+impl From<AuthError> for ApprovalCommandError {
     fn from(error: AuthError) -> Self {
-        Self {
-            label: error.label().to_string(),
-            detail: error.detail(),
-        }
+        let kind = match &error {
+            AuthError::Cancelled => ApprovalErrorKind::Cancelled,
+            AuthError::Failed(_) => ApprovalErrorKind::Failed,
+            AuthError::Unavailable(_) => ApprovalErrorKind::Unavailable,
+            AuthError::Timeout => ApprovalErrorKind::Timeout,
+        };
+        Self::new(kind, error.detail())
     }
 }
 
@@ -689,13 +812,10 @@ impl From<AuthorizeError> for AuthorizeFailure {
     }
 }
 
-impl From<AuthorizeFailure> for ApprovalFailure {
+impl From<AuthorizeFailure> for ApprovalCommandError {
     fn from(error: AuthorizeFailure) -> Self {
         match error {
-            AuthorizeFailure::Store(error) => Self {
-                label: error.label().to_string(),
-                detail: error.detail(),
-            },
+            AuthorizeFailure::Store(error) => error.into(),
             AuthorizeFailure::Auth(error) => error.into(),
         }
     }
@@ -709,7 +829,7 @@ pub fn approval_begin(
     app: AppHandle,
     store: State<'_, ApprovalStore>,
     request: ApprovalRequest,
-) -> Result<String, ApprovalFailure> {
+) -> Result<String, ApprovalCommandError> {
     let outcome = store.begin(request)?;
     if let Some(superseded) = &outcome.superseded {
         events::emit(
@@ -738,19 +858,22 @@ pub fn approval_begin(
 }
 
 /// Authenticates and, on success, authorizes the request. Runs the prompt on the
-/// blocking pool so the Tauri async runtime is never blocked.
+/// blocking pool so the Tauri async runtime is never blocked. Resolves to the
+/// updated [`ApprovalSnapshot`] so the card can render the `authorized` state
+/// without a second round trip.
 #[tauri::command]
 pub async fn approval_authorize(
     app: AppHandle,
     store: State<'_, ApprovalStore>,
     authenticator: State<'_, Arc<dyn Authenticator>>,
     id: String,
-) -> Result<(), ApprovalFailure> {
-    let store = store.inner().clone();
+) -> Result<ApprovalSnapshot, ApprovalCommandError> {
+    let snapshot_store = store.inner().clone();
+    let task_store = snapshot_store.clone();
     let authenticator = Arc::clone(authenticator.inner());
     let task_id = id.clone();
     let joined = tauri::async_runtime::spawn_blocking(move || {
-        store.authorize_with(&task_id, authenticator.as_ref())
+        task_store.authorize_with(&task_id, authenticator.as_ref())
     })
     .await;
 
@@ -763,23 +886,29 @@ pub async fn approval_authorize(
                     approved: true,
                 },
             );
-            Ok(())
+            snapshot_store.snapshot_of(&id).ok_or_else(|| {
+                ApprovalCommandError::new(
+                    ApprovalErrorKind::NotPending,
+                    "the approval request was replaced before its snapshot was read",
+                )
+            })
         }
         Ok(Err(failure)) => Err(failure.into()),
-        Err(error) => Err(ApprovalFailure {
-            label: "Auth failed".to_string(),
-            detail: format!("the approval task did not finish: {error}"),
-        }),
+        Err(error) => Err(ApprovalCommandError::new(
+            ApprovalErrorKind::Failed,
+            format!("the approval task did not finish: {error}"),
+        )),
     }
 }
 
-/// Denies a pending request (an explicit user decision).
+/// Denies a pending request (an explicit user decision). Resolves to the updated
+/// [`ApprovalSnapshot`] (state `denied`).
 #[tauri::command]
 pub fn approval_deny(
     app: AppHandle,
     store: State<'_, ApprovalStore>,
     id: String,
-) -> Result<(), ApprovalFailure> {
+) -> Result<ApprovalSnapshot, ApprovalCommandError> {
     let payload_hash = store.deny(&id)?;
     events::emit(
         &app,
@@ -788,7 +917,12 @@ pub fn approval_deny(
             approved: false,
         },
     );
-    Ok(())
+    store.snapshot_of(&id).ok_or_else(|| {
+        ApprovalCommandError::new(
+            ApprovalErrorKind::NotPending,
+            "the approval request was replaced before its snapshot was read",
+        )
+    })
 }
 
 /// The state of one request, for a panel that already has an id.
@@ -933,20 +1067,46 @@ mod tests {
     }
 
     #[test]
-    fn begin_rejects_wallet_only_without_the_anchor_marker() {
+    fn begin_rejects_wallet_only_from_the_webview() {
         let store = ApprovalStore::new();
+        // Neither omitting `origin` nor supplying the anchor marker unlocks it:
+        // `origin` is a plain webview string and is never an authorization
+        // signal.
         let mut req = request(XDR_ABC);
         req.mode = ApprovalMode::WalletOnly;
+        assert_eq!(store.begin(req), Err(BeginError::WalletOnlyNotAllowed));
+
+        let mut req = request(XDR_ABC);
+        req.mode = ApprovalMode::WalletOnly;
+        req.origin = Some("anchor".to_string());
         assert_eq!(store.begin(req), Err(BeginError::WalletOnlyNotAllowed));
     }
 
     #[test]
-    fn begin_accepts_wallet_only_with_the_anchor_marker() {
+    fn begin_wallet_only_creates_a_request_the_webview_cannot_authorize() {
         let store = ApprovalStore::new();
-        let mut req = request(XDR_ABC);
-        req.mode = ApprovalMode::WalletOnly;
-        req.origin = Some(ANCHOR_ORIGIN.to_string());
-        assert!(store.begin(req).is_ok());
+        let outcome = store.begin_wallet_only(request(XDR_ABC)).unwrap();
+        assert_eq!(outcome.request.mode, ApprovalMode::WalletOnly);
+
+        // The webview authorize path must refuse it: only the Rust-side anchor
+        // path (W5) may authorize a `WalletOnly` request, so no webview call can
+        // flip it to Authorized without a real gesture.
+        let auth = FakeAuth::ok();
+        assert_eq!(
+            store.authorize_with(&outcome.request.id, &auth),
+            Err(AuthorizeFailure::Store(AuthorizeError::WalletOnly))
+        );
+        assert_eq!(*auth.calls.lock().unwrap(), 0);
+        assert_eq!(
+            store.status(&outcome.request.id).unwrap().state,
+            ApprovalState::Pending
+        );
+        assert_eq!(
+            store.take_authorized(&outcome.request.id),
+            Err(TakeError::NotAuthorized {
+                state: ApprovalState::Pending
+            })
+        );
     }
 
     #[test]
@@ -1031,16 +1191,32 @@ mod tests {
     }
 
     #[test]
-    fn a_wallet_only_request_never_prompts() {
+    fn a_panicking_authenticator_does_not_wedge_the_request() {
+        struct PanicAuth;
+        impl Authenticator for PanicAuth {
+            fn authenticate(&self, _reason: &str) -> Result<(), AuthError> {
+                panic!("authenticator blew up");
+            }
+        }
+
         let store = ApprovalStore::new();
-        let mut req = request(XDR_ABC);
-        req.mode = ApprovalMode::WalletOnly;
-        req.origin = Some(ANCHOR_ORIGIN.to_string());
-        let outcome = store.begin(req).unwrap();
-        let auth = FakeAuth::err(AuthError::Failed("must not be called".into()));
-        let payload_hash = store.authorize_with(&outcome.request.id, &auth).unwrap();
-        assert_eq!(payload_hash, XDR_ABC_HASH);
-        assert_eq!(*auth.calls.lock().unwrap(), 0);
+        let outcome = store.begin(request(XDR_ABC)).unwrap();
+        // The panic unwinds through `authorize_with`; the RAII guard must still
+        // release the in-flight latch.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            store.authorize_with(&outcome.request.id, &PanicAuth)
+        }));
+        assert!(result.is_err());
+
+        // A later call is not `Busy`; the request is still Pending and can be
+        // authorized normally.
+        let auth = FakeAuth::ok();
+        assert!(store.authorize_with(&outcome.request.id, &auth).is_ok());
+        assert_eq!(*auth.calls.lock().unwrap(), 1);
+        assert_eq!(
+            store.status(&outcome.request.id).unwrap().state,
+            ApprovalState::Authorized
+        );
     }
 
     #[test]
@@ -1151,5 +1327,64 @@ mod tests {
 
         let status = serde_json::to_string(&store.status(&outcome.request.id).unwrap()).unwrap();
         assert_eq!(status, r#"{"id":"apr_0000000000000001","state":"pending"}"#);
+    }
+
+    #[test]
+    fn approval_command_error_serializes_as_kind_and_message() {
+        let error = ApprovalCommandError::from(AuthorizeFailure::Auth(AuthError::Cancelled));
+        assert_eq!(
+            serde_json::to_string(&error).unwrap(),
+            r#"{"kind":"cancelled","message":"the approval prompt was cancelled"}"#
+        );
+    }
+
+    #[test]
+    fn gate_errors_map_to_the_contract_kinds() {
+        let kind = |error: ApprovalCommandError| error.kind;
+        assert_eq!(
+            kind(AuthError::Cancelled.into()),
+            ApprovalErrorKind::Cancelled
+        );
+        assert_eq!(
+            kind(AuthError::Failed("x".into()).into()),
+            ApprovalErrorKind::Failed
+        );
+        assert_eq!(
+            kind(AuthError::Unavailable("x".into()).into()),
+            ApprovalErrorKind::Unavailable
+        );
+        assert_eq!(kind(AuthError::Timeout.into()), ApprovalErrorKind::Timeout);
+        assert_eq!(
+            kind(AuthorizeError::Expired.into()),
+            ApprovalErrorKind::Expired
+        );
+        assert_eq!(
+            kind(AuthorizeError::NotFound.into()),
+            ApprovalErrorKind::NotPending
+        );
+        assert_eq!(
+            kind(AuthorizeError::NotPending {
+                state: ApprovalState::Denied
+            }
+            .into()),
+            ApprovalErrorKind::NotPending
+        );
+        assert_eq!(kind(AuthorizeError::Busy.into()), ApprovalErrorKind::Failed);
+        assert_eq!(
+            kind(AuthorizeError::WalletOnly.into()),
+            ApprovalErrorKind::Failed
+        );
+        assert_eq!(
+            kind(BeginError::HashMismatch.into()),
+            ApprovalErrorKind::Failed
+        );
+        assert_eq!(
+            kind(DenyError::NotPending {
+                state: ApprovalState::Denied
+            }
+            .into()),
+            ApprovalErrorKind::NotPending
+        );
+        assert_eq!(kind(DenyError::Expired.into()), ApprovalErrorKind::Expired);
     }
 }

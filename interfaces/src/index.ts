@@ -201,7 +201,11 @@ export interface AppInfo {
 }
 
 /* ------------------------------------------------------------------ *
- * 7. Approval gate (step W3)
+ * 8. Approval gate (step W3)
+ *
+ * Section 7 is reserved for the chain-configuration types (W1), which append
+ * after `AppInfo` too; this section is numbered 8 so the two branches do not
+ * collide on merge.
  * ------------------------------------------------------------------ */
 
 /** How an approval is expected to be granted. */
@@ -212,8 +216,7 @@ export type ApprovalState = "pending" | "authorized" | "denied" | "expired" | "c
 
 /**
  * The input to `approval_begin`. `payloadHash` must be the lowercase hex SHA-256
- * of the UTF-8 bytes of `unsignedXdr` (the same digest the agent calls
- * `payloadHashOfXdr`); the gate rejects a mismatch.
+ * of the UTF-8 bytes of `unsignedXdr`; the gate rejects a mismatch.
  */
 export interface ApprovalRequestInput {
   /** Assigned by the gate; the webview may omit it. */
@@ -225,7 +228,11 @@ export interface ApprovalRequestInput {
   intent: Intent;
   /** Defaults to `"touch_id"`. */
   mode?: ApprovalMode;
-  /** Required for `"wallet_only"`; anchor flows only. */
+  /**
+   * Reserved for the anchor flow (W5). It is **not** an authorization signal:
+   * `approval_begin` rejects `"wallet_only"` unconditionally, and only an
+   * in-process Rust API can create such a request.
+   */
   origin?: string;
 }
 
@@ -251,8 +258,31 @@ export interface ApprovalStatus {
   reason?: string;
 }
 
+/**
+ * The failure categories every approval command rejects with. The approval card
+ * branches on `kind`; `message` is human-readable detail. The Rust mirror is
+ * `ApprovalErrorKind` in `app/src-tauri/src/approval.rs`.
+ */
+export type ApprovalErrorKind =
+  | "cancelled"
+  | "failed"
+  | "unavailable"
+  | "timeout"
+  | "expired"
+  | "notPending";
+
+/**
+ * The typed rejection shape of the approval commands. `approval_authorize` and
+ * `approval_deny` otherwise resolve to the updated `ApprovalSnapshot`; the
+ * command contract is declared in `docs/interfaces.md` §8.
+ */
+export interface ApprovalCommandError {
+  kind: ApprovalErrorKind;
+  message: string;
+}
+
 /* ------------------------------------------------------------------ *
- * 8. Feature health (Debug panel contract)
+ * 9. Feature health (Debug panel contract)
  * ------------------------------------------------------------------ */
 
 export type HealthStatus = "ok" | "warn" | "fail" | "unknown";
