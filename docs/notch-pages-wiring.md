@@ -22,3 +22,12 @@ Notes:
   `runTx`), never a page-local call.
 - No secrets, testnet only. Owner address and aliases come from `stellar_config`,
   never from the bundle.
+
+## NW1 — Wallet page (done)
+
+`WalletPage.tsx` now calls `useWalletData` (`app/src/notch/data/useWalletData.ts`), which loads
+`stellar_config` plus `fetchOwnerAccount`/`fetchOwnerPayments`, merges the alias book with
+`buildAliasEntries`/`mapWalletTransactions`, and subscribes to `tx_submitted` for a session "Latest
+transaction". A pure `deriveWalletPageView` picks the state (loading / unconfigured / offline /
+unfunded + Friendbot / ready) so the page renders only real data or an honest error; there is
+deliberately no mock fallback. Reads are read-only, load on mount and refresh on demand (no polling).
