@@ -927,6 +927,10 @@
 - **Numbers:** `check.sh` all passed; `npm test -w @polaris/app` 378/378; `npm run build -w @polaris/app` built; `cargo test` (Tauri shell) 320 passed. Visual result still unverified by the agent.
 - **Status:** decided (owner must eyeball the nav-column face, the no-click tracking and the icon on a real Mac)
 
+## 2026-09-20 — Dark Polaris introduction page
+- **Idea:** Adapt the supplied light editorial reference into a simple dark single-page product introduction, with generous spacing, an oversized headline and overlapping colorful product illustrations.
+- **Decision:** Keep the page isolated in `landing/` as static HTML/CSS; desktop runtime and wallet functionality remain separate. Clearly identify concept illustrations and Stellar testnet status.
+- **Status:** Implemented; the user will supply a demo video later. The demo placeholder and integration instructions are ready.
 ## 2026-09-20 — The First-Run Round Lands: #34 (native + rehearsal) and #35 (six pages) on main
 
 - **Merged, in this order and for a reason:** #34 (`feat/onboarding-native`) → `d864627`, then #35 (`feat/onboarding-ui`) → `7f41f55`. #35 was **rebased onto** `d864627` instead of merged into it: the six pages replace the native worker's placeholder at the same two paths, so the conflict set only becomes meaningful once the native side is on main. Rebase-then-squash also keeps the PR diff readable — a merge commit would have carried four hand-resolved files into review.
