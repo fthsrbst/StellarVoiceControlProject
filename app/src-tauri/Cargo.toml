@@ -70,7 +70,7 @@ objc2 = "0.6"
 # diagnostics (step A15); `NSWorkspace`/`NSRunningApplication` are also how the
 # folded prompt hands keyboard focus back to the app the user came from when it
 # closes.
-objc2-app-kit = { version = "0.3", features = ["NSScreen", "NSWindow", "NSWorkspace", "NSRunningApplication"] }
+objc2-app-kit = { version = "0.3", features = ["NSScreen", "NSWindow", "NSWorkspace", "NSRunningApplication", "NSApplication"] }
 # `NSGeometry` carries NSPoint/NSRect/NSSize/NSEdgeInsets; `NSEnumerator`
 # unlocks NSArray::iter, used to scan screens for the notched display.
 # Step W3 adds `NSString`/`NSError` for the LocalAuthentication prompt and its
