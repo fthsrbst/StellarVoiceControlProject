@@ -1,13 +1,12 @@
 # Autonomy
 
-> **Project link: **
+**Project link: **
 
 ## Download Autonomy
 ### macOS
 
 [![Download for macOS](https://img.shields.io/badge/Download_for_macOS-Apple_Silicon-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/n0tnow/StellarVoiceControlProject/releases/download/v0.2.1/Autonomy_0.2.1_aarch64.dmg)
 
-> Requires Apple Silicon (M1 or later). <!-- TODO: replace this line with the public project/demo URL before submission -->
 
 Autonomy is a **push-to-talk voice assistant for Stellar that lives in the MacBook notch.** Hold `Control+Option`, speak Turkish or English, and Autonomy answers — or turns the request into a real Stellar transaction: a payment, a spending rule, a scheduled transfer, a bank on/off-ramp, or a peer-to-peer trade. Every value-moving step is rendered as a decoded transaction card and gated by Touch ID; anything that runs unattended is bounded by an on-chain Soroban guard.
 
