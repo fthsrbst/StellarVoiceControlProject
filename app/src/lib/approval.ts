@@ -11,7 +11,7 @@
  * (`approval.test.ts`); production callers use the default Tauri `invoke`.
  */
 import { invoke } from "@tauri-apps/api/core";
-import type { ChainToolResult, Intent } from "@polaris/interfaces";
+import type { ApprovalRequestInput, ChainToolResult, Intent } from "@polaris/interfaces";
 
 /** How the user must approve: a Touch ID prompt, or a wallet signature. */
 export type ApprovalMode = "touch_id" | "wallet_only";
@@ -33,6 +33,18 @@ export interface ApprovalSnapshot {
   state: ApprovalState;
   /** Unix epoch milliseconds; the card marks the request expired at this instant. */
   expiresAtMs: number;
+}
+
+/**
+ * The current state of one request as `approval_status` reports it, including
+ * why it was denied. W4b's approver uses this as the authoritative poll, so the
+ * decision never comes from an event alone. Same shape as
+ * `ApprovalStatus` in `@polaris/interfaces`.
+ */
+export interface ApprovalStatus {
+  id: string;
+  state: ApprovalState;
+  reason?: string;
 }
 
 /** The typed failure union every approval command rejects with. */
@@ -121,6 +133,42 @@ export async function approvalCurrent(
 ): Promise<ApprovalSnapshot | null> {
   try {
     return await invokeImpl<ApprovalSnapshot | null>("approval_current");
+  } catch (error) {
+    throw toApprovalError(error);
+  }
+}
+
+/**
+ * `approval_begin(request)` — registers a pending request with the Rust gate and
+ * returns its assigned id. The gate re-hashes `unsignedXdr` and rejects a
+ * mismatch, so the digest the card shows binds the blob that may be released.
+ *
+ * W4b's Touch ID approver calls this before opening the card; a rejection here
+ * is a fail-closed failure, never an approval.
+ */
+export async function approvalBegin(
+  request: ApprovalRequestInput,
+  invokeImpl: InvokeFn = invoke,
+): Promise<string> {
+  try {
+    return await invokeImpl<string>("approval_begin", { request });
+  } catch (error) {
+    throw toApprovalError(error);
+  }
+}
+
+/**
+ * `approval_status(id)` — the gate's authoritative state for one request, or
+ * `null` when the id is unknown (typically because a later request superseded
+ * it). The approver polls this so a decision comes from the gate, not only from
+ * an event that might have been dropped.
+ */
+export async function approvalStatus(
+  id: string,
+  invokeImpl: InvokeFn = invoke,
+): Promise<ApprovalStatus | null> {
+  try {
+    return await invokeImpl<ApprovalStatus | null>("approval_status", { id });
   } catch (error) {
     throw toApprovalError(error);
   }

@@ -1,0 +1,156 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import {
+  approvalSelftestResult,
+  bridgeSelftestResult,
+  buildSelfTestXdr,
+  mapHealthToResult,
+  summarizeNetwork,
+  type NetworkFacts,
+} from "./checkHelpers.ts";
+import type { DebugFeatureHealth } from "./commands.ts";
+
+/** A valid testnet G-address (the committed `ada` alias; public, never a secret). */
+const OWNER = "GARXWVNCJ22U2OR23LAB5Z5RWI2XFIJZA2R3TRPFUKKY65JQZZOEWWCO";
+
+function facts(overrides: Partial<NetworkFacts> = {}): NetworkFacts {
+  return {
+    config: {
+      network: "testnet",
+      horizonUrl: "https://horizon-testnet.stellar.org",
+      ownerAddress: OWNER,
+    },
+    aliasBookResolved: true,
+    recipientAlias: "acc2",
+    recipientResolved: true,
+    horizon: { exists: true, xlmBalance: "1000.0000000" },
+    ...overrides,
+  };
+}
+
+test("network ok: testnet, funded owner and a resolved alias show the balance", () => {
+  const result = summarizeNetwork(facts());
+  assert.equal(result.status, "ok");
+  assert.match(result.detail, /testnet/);
+  assert.match(result.detail, /1000\.0000000 XLM/);
+  assert.match(result.detail, new RegExp(OWNER));
+});
+
+test("network warn: a missing command is not a failure", () => {
+  const result = summarizeNetwork(
+    facts({
+      config: null,
+      aliasBookResolved: false,
+      recipientResolved: false,
+      horizon: null,
+    }),
+  );
+  assert.equal(result.status, "warn");
+});
+
+test("network warn: no owner address tells the user what to set", () => {
+  const result = summarizeNetwork(
+    facts({ config: { network: "testnet", ownerAddress: null }, horizon: null }),
+  );
+  assert.equal(result.status, "warn");
+  assert.match(result.detail, /POLARIS_OWNER_ADDRESS/);
+});
+
+test("network fail: a non-testnet network is refused", () => {
+  const result = summarizeNetwork(facts({ config: { network: "public", ownerAddress: OWNER } }));
+  assert.equal(result.status, "fail");
+  assert.match(result.detail, /testnet-only/);
+});
+
+test("network fail: a malformed owner address is caught", () => {
+  const result = summarizeNetwork(facts({ config: { network: "testnet", ownerAddress: "Gbad" } }));
+  assert.equal(result.status, "fail");
+  assert.match(result.detail, /valid G/);
+});
+
+test("network fail: an unresolvable recipient alias names the alias", () => {
+  const result = summarizeNetwork(facts({ recipientResolved: false }));
+  assert.equal(result.status, "fail");
+  assert.match(result.detail, /acc2/);
+});
+
+test("network fail: Horizon unreachable and account missing are distinct messages", () => {
+  const unreachable = summarizeNetwork(facts({ horizon: null }));
+  assert.equal(unreachable.status, "fail");
+  assert.match(unreachable.detail, /unreachable/);
+
+  const missing = summarizeNetwork(facts({ horizon: { exists: false } }));
+  assert.equal(missing.status, "fail");
+  assert.match(missing.detail, /not found/);
+});
+
+test("network fail: an unfunded account is a fail with the 0 balance", () => {
+  const result = summarizeNetwork(facts({ horizon: { exists: true, xlmBalance: "0.0000000" } }));
+  assert.equal(result.status, "fail");
+  assert.match(result.detail, /0\.0000000 XLM/);
+});
+
+function health(status: DebugFeatureHealth["status"], detail = "d"): DebugFeatureHealth {
+  return { id: "x", title: "X", milestone: "W3", status, detail, checkedAt: 1 };
+}
+
+test("health maps straight through for the non-prompting probe", () => {
+  assert.equal(mapHealthToResult(health("ok", "enrolled")).status, "ok");
+  assert.equal(mapHealthToResult(health("warn", "password only")).status, "warn");
+  assert.equal(mapHealthToResult(health("fail", "unavailable")).status, "fail");
+});
+
+test("a cancelled Touch ID self-test is a warn, not a fail", () => {
+  assert.equal(approvalSelftestResult(health("warn", "cancelled")).status, "warn");
+  assert.equal(approvalSelftestResult(health("ok")).status, "ok");
+  assert.equal(approvalSelftestResult(health("fail", "hardware")).status, "fail");
+});
+
+test("bridge self-test ok names the throwaway hash and states nothing was submitted", () => {
+  const result = bridgeSelftestResult({ ok: true, txHash: "abc" });
+  assert.equal(result.status, "ok");
+  assert.match(result.detail, /abc/);
+  assert.match(result.detail, /nothing was submitted/);
+});
+
+test("each bridge failure code maps to a human label", () => {
+  const codes = [
+    "rejected",
+    "address_mismatch",
+    "network_mismatch",
+    "wallet_unavailable",
+    "not_authorized",
+    "integrity",
+    "timeout",
+    "error",
+  ];
+  for (const code of codes) {
+    const result = bridgeSelftestResult({ ok: false, code, message: "why" });
+    assert.equal(result.status, "fail");
+    assert.ok(result.detail.length > 0);
+    assert.match(result.detail, /why/);
+  }
+});
+
+test("buildSelfTestXdr produces a sequence-0 native payment from the owner to itself", async () => {
+  const { TransactionBuilder, Transaction, Asset } = await import("@stellar/stellar-sdk");
+  const { TESTNET } = await import("@polaris/stellar");
+
+  const xdr = await buildSelfTestXdr(OWNER);
+  const tx = TransactionBuilder.fromXDR(xdr, TESTNET.networkPassphrase);
+  assert.ok(tx instanceof Transaction);
+  assert.equal(tx.source, OWNER);
+  assert.equal(tx.sequence, "0");
+  assert.equal(tx.operations.length, 1);
+  const op = tx.operations[0];
+  assert.equal(op?.type, "payment");
+  if (op?.type === "payment") {
+    assert.equal(op.destination, OWNER);
+    assert.equal(op.amount, "1.0000000");
+    assert.ok(op.asset.equals(Asset.native()));
+  }
+  // An unsigned envelope: no signatures, so it is only safe to hand to the
+  // bridge self-test, never to submit.
+  assert.equal(tx.signatures.length, 0);
+});

@@ -5,7 +5,8 @@ import type { CaptureStatus, NotchGeometry } from "@polaris/interfaces";
 import { StageLabel } from "@/components/StageLabel";
 import { runAgentTurn, type AgentOutcome } from "@/lib/agent";
 import { executeApprovedIntent } from "@/lib/chain";
-import { speakTurnResult } from "@/lib/speech";
+import { speakSentence, speakTurnResult } from "@/lib/speech";
+import { failureSentence, submittedSentence } from "@polaris/agent";
 import { TurnFlow } from "@/lib/turnFlow";
 import { isCurrentTurn, reduceTurnSession, stageWatchdog, type TurnSession } from "@/lib/turnSession";
 import {
@@ -184,18 +185,34 @@ export default function App() {
           // must not overwrite the newer turn's UI — the same rule the speech
           // path applies.
           const turnId = sessionRef.current?.id;
-          void executeApprovedIntent(run.outcome.intent)
+          // Capture the narrowed intent: TypeScript does not carry the `if`
+          // narrowing into the async closure below.
+          const intent = run.outcome.intent;
+          void executeApprovedIntent(intent)
             .then((outcome) => {
               if (disposed || !isCurrentTurn(sessionRef.current, turnId)) return;
-              if (outcome.status === "executed") {
-                console.info(
-                  "chain tool produced an unsigned transaction",
-                  outcome.result?.summary,
-                );
-                speakWithSettle(run.outcome);
+              if (outcome.status === "executed" && outcome.txHash) {
+                // W4b: the signed transaction reached the network. Announce the
+                // real result (not the pre-approval confirmation) and let the
+                // real `speech_status` stream end the turn.
+                console.info("transaction submitted", outcome.explorerUrl);
+                const sentence = submittedSentence(intent, run.outcome.language);
+                speakSentence(sentence, run.outcome.language, (error) => {
+                  console.warn("speech produced no audio; settling the turn", error);
+                  if (isCurrentTurn(sessionRef.current, turnId)) {
+                    dispatchTurn({ type: "failed", label: "Voice error" });
+                  }
+                });
               } else {
+                // A deny, wallet refusal, timeout, integrity or submit failure:
+                // a short spoken line plus the visible label.
                 console.warn(`execution ${outcome.status}: ${outcome.detail ?? ""}`);
-                dispatchTurn({ type: "failed", label: outcome.label ?? "Chain error" });
+                const label = outcome.label ?? "Chain error";
+                speakSentence(
+                  failureSentence(label, run.outcome.language),
+                  run.outcome.language,
+                );
+                dispatchTurn({ type: "failed", label });
               }
             })
             .catch((error: unknown) => {

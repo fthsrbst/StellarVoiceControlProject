@@ -31,21 +31,57 @@
  * gate is the only change needed to activate the real approval flow; see
  * `agent/src/execution.ts` for the seam contract.
  */
-import { executeIntent, resolveApprover, type ExecutionOutcome } from "@polaris/agent";
+import { isTauri } from "@tauri-apps/api/core";
+import {
+  createDenyApprover,
+  executeIntent,
+  resolveApprover,
+  type ExecutionOutcome,
+  type IntentApprover,
+} from "@polaris/agent";
 import type { Intent } from "@polaris/interfaces";
 
 import { getStellarConfig } from "@/lib/stellarConfig";
+import { createTouchIdApprover, defaultApproverDeps, type ApproverDeps } from "@/lib/approver";
+import {
+  defaultSigningDeps,
+  signAndSubmit,
+  type SubmittedOutcome,
+  type SigningDeps,
+} from "@/lib/signing";
 import committedAliases from "../../../stellar/config/aliases.json";
 
 /**
- * The single selection to replace when Touch ID lands (separate milestone).
+ * The approver selection (W4b). **Fail-closed by default.**
  *
- * Defaults to fail closed. `POLARIS_ALLOW_AUTO_APPROVE=1` opts into the loud
- * auto-approval placeholder, which is safe only while the chain tools are
- * stubs; it exists so the stubbed demo can reach the execution seam. This is a
- * non-secret flag, exposed to the webview by the Vite `envPrefix`.
+ * * In a real Tauri runtime the Touch ID gate (W3) is the approver: it registers
+ *   the exact blob, opens the approval card and returns a decision only when the
+ *   gate reports `authorized`.
+ * * `POLARIS_ALLOW_AUTO_APPROVE=1` still opts into the loud auto-approval
+ *   placeholder — but **only outside** a Tauri runtime (the CLI/demo path). In
+ *   the app the gate always wins, so the placeholder can never move real value.
+ * * Everything else is the deny-all gate.
+ *
+ * The Touch ID approver is built lazily (its event subscription is async), so a
+ * turn that never reaches the chain pays for nothing.
  */
-const approver = resolveApprover(import.meta.env.POLARIS_ALLOW_AUTO_APPROVE === "1");
+let approverPromise: Promise<IntentApprover> | undefined;
+
+async function resolveRuntimeApprover(): Promise<IntentApprover> {
+  if (isTauri()) {
+    const deps: ApproverDeps = await defaultApproverDeps();
+    return createTouchIdApprover(deps);
+  }
+  if (import.meta.env.POLARIS_ALLOW_AUTO_APPROVE === "1") {
+    return resolveApprover(true);
+  }
+  return createDenyApprover();
+}
+
+function approverFor(): Promise<IntentApprover> {
+  approverPromise ??= resolveRuntimeApprover();
+  return approverPromise;
+}
 
 /** Thrown (and caught below) only when the owner wallet is not configured. */
 const OWNER_MISSING = "POLARIS_OWNER_ADDRESS is not set";
@@ -104,16 +140,29 @@ async function ensurePaymentsConfigured(): Promise<void> {
 }
 
 /**
- * Executes one validated intent down the single seam.
+ * Executes one validated intent down the single seam: build → approve → sign →
+ * submit.
  *
  * The chain package is imported lazily, only when an intent actually exists: its
  * SDK is large, and a voice turn that never reaches the chain must not pay for
  * it at shell startup. Never throws — a missing owner, a failed config read and
  * every execution failure (including Owner B's `NotImplementedError` stubs) come
- * back as a labelled `ExecutionOutcome`, so the notch can show a short message
+ * back as a labelled `SubmittedOutcome`, so the notch can show a short message
  * and settle instead of crashing or hanging.
+ *
+ * On success the returned outcome carries `txHash`/`explorerUrl` (and the raw
+ * `ExecutionOutcome` fields), which the shell's speak path announces. A failure
+ * anywhere in the values above — including the wallet declining, an integrity
+ * failure or a rejected submission — is a labelled failure with no `txHash`.
  */
-export async function executeApprovedIntent(intent: Intent): Promise<ExecutionOutcome> {
+export async function executeApprovedIntent(
+  intent: Intent,
+  signingDeps?: Partial<SigningDeps>,
+): Promise<SubmittedOutcome> {
+  const deps: SigningDeps = {
+    ...defaultSigningDeps,
+    ...signingDeps,
+  };
   try {
     await ensurePaymentsConfigured();
   } catch (error) {
@@ -132,5 +181,7 @@ export async function executeApprovedIntent(intent: Intent): Promise<ExecutionOu
     guard_policy: guardPolicy,
     deposit: depositTry,
   } as const;
-  return executeIntent(intent, { approver, chainTools });
+  const approver = await approverFor();
+  const outcome: ExecutionOutcome = await executeIntent(intent, { approver, chainTools });
+  return signAndSubmit(outcome, deps);
 }

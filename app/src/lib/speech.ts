@@ -55,6 +55,20 @@ export function speakTurnResult(
   queue.enqueue(spokenText(result), onFailure, result.language);
 }
 
+/**
+ * Speaks one already-built sentence (W4b): the post-submission confirmation or a
+ * short spoken failure. Unlike [`speakTurnResult`] this does not derive the
+ * sentence from an intent, because by this point the intent has been sent and
+ * the wording is the outcome's, not a confirmation prompt.
+ */
+export function speakSentence(
+  text: string,
+  language?: string,
+  onFailure?: (error: unknown) => void,
+): void {
+  queue.enqueue(text, onFailure, language);
+}
+
 /** True while an utterance is playing; exposed for tests and future mute UI. */
 export function isSpeaking(): boolean {
   return queue.speaking;
