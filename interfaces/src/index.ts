@@ -199,3 +199,72 @@ export interface AppInfo {
   network: string;
   tauriVersion: string;
 }
+
+/* ------------------------------------------------------------------ *
+ * 7. Approval gate (step W3)
+ * ------------------------------------------------------------------ */
+
+/** How an approval is expected to be granted. */
+export type ApprovalMode = "touch_id" | "wallet_only";
+
+/** The lifecycle of one approval request; `consumed` is terminal and one-way. */
+export type ApprovalState = "pending" | "authorized" | "denied" | "expired" | "consumed";
+
+/**
+ * The input to `approval_begin`. `payloadHash` must be the lowercase hex SHA-256
+ * of the UTF-8 bytes of `unsignedXdr` (the same digest the agent calls
+ * `payloadHashOfXdr`); the gate rejects a mismatch.
+ */
+export interface ApprovalRequestInput {
+  /** Assigned by the gate; the webview may omit it. */
+  id?: string;
+  payloadHash: string;
+  /** base64 XDR, unsigned */
+  unsignedXdr: string;
+  summary: ChainToolResult["summary"];
+  intent: Intent;
+  /** Defaults to `"touch_id"`. */
+  mode?: ApprovalMode;
+  /** Required for `"wallet_only"`; anchor flows only. */
+  origin?: string;
+}
+
+/**
+ * What `approval_current` returns so a panel that opened *after* the
+ * `approval_request` event can hydrate. It deliberately never carries the
+ * unsigned XDR.
+ */
+export interface ApprovalSnapshot {
+  id: string;
+  payloadHash: string;
+  summary: ChainToolResult["summary"];
+  intent: Intent;
+  mode: ApprovalMode;
+  state: ApprovalState;
+  expiresAtMs: number;
+}
+
+/** What `approval_status` returns, including why a request was denied. */
+export interface ApprovalStatus {
+  id: string;
+  state: ApprovalState;
+  reason?: string;
+}
+
+/* ------------------------------------------------------------------ *
+ * 8. Feature health (Debug panel contract)
+ * ------------------------------------------------------------------ */
+
+export type HealthStatus = "ok" | "warn" | "fail" | "unknown";
+
+/** One feature's health, rendered directly by the in-app Debug panel. */
+export interface FeatureHealth {
+  id: string;
+  title: string;
+  milestone: string;
+  status: HealthStatus;
+  /** One actionable sentence; never contains secrets. */
+  detail: string;
+  /** Milliseconds since the Unix epoch. */
+  checkedAt: number;
+}
