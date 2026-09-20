@@ -557,8 +557,8 @@ pub fn fallback_geometry(screen_width: f64, screen_height: f64) -> ShellGeometry
 /// flash at the left. A constant width and a constant left edge remove that
 /// hazard; the shell is top-anchored, so the per-state height growth does not
 /// move it either.
-pub fn window_size(state: &ShellStateGeometry, _window_width: f64) -> (f64, f64) {
-    (state.width + 2.0 * WINDOW_MARGIN_SIDE, state.height + WINDOW_MARGIN_BOTTOM)
+pub fn window_size(state: &ShellStateGeometry, window_width: f64) -> (f64, f64) {
+    (window_width, state.height + WINDOW_MARGIN_BOTTOM)
 }
 
 /// Left edge (global coordinates) of a window centred on the cutout.

@@ -42,7 +42,26 @@ function todo(tool: string): ChainTool {
  */
 // Real payment builder (Intent -> unsigned XDR + decoded summary). Configure it once
 // with `configurePayments(deps)`; calling it before that throws a typed refusal.
+// The shell's composition root (`app/src/lib/chain.ts`) needs the config and
+// alias-book helpers too, so they are re-exported here.
 export { sendPayment } from "./payments/index.ts";
+// `payloadHashOf` is the Stellar *transaction hash* (`Transaction.hash()`), used
+// by the chain summary / explorer URL. It is NOT the agent seam's `payloadHash`
+// (that is the XDR digest, SHA-256 of the base64 unsigned-XDR string); never pass
+// this value to the approval gate. Re-exported so callers can tell them apart.
+export { payloadHashOf } from "./payments/index.ts";
+export {
+  configurePayments,
+  defaultAssetRegistry,
+  defaultPaymentDeps,
+  parseAliasBook,
+  toSdkAsset,
+  PaymentRefusal,
+  type AliasBook,
+  type AssetRegistry,
+  type AssetSpec,
+  type PaymentDeps,
+} from "./payments/index.ts";
 export const swap = todo("swap");
 export const guardPolicy = todo("guardPolicy");
 
@@ -66,3 +85,15 @@ export * as schedule from "./schedule/index.ts";
 
 /** Deterministic, offline suggestions engine (T3). Pure: never applies a change (D11). */
 export * as suggest from "./suggest/index.ts";
+
+/** P2P escrow client (W8): unsigned `create_offer`/`accept`/`confirm_fiat`/`cancel`/`reclaim` + read helpers (contract id is a parameter). */
+export * as p2p from "./p2p/index.ts";
+// Root type re-exports so the shell can type a P2P client without a namespace import.
+export type { Offer, OfferState, P2pCall, P2pClient } from "./p2p/index.ts";
+/**
+ * Resequencing helpers for multi-step approval flows: every step built up front
+ * embeds the same account sequence, so each one is rewritten to its source's
+ * current next sequence right before it is approved. Re-exported for the app's
+ * shared `txPipeline` (the single no-copy source is `live/submit.ts`).
+ */
+export { resequenceEnvelope, setSequence } from "./live/submit.ts";

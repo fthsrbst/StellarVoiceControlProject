@@ -18,9 +18,18 @@ tauri-build = { version = "2.6.3", features = [] }
 # `macos-private-api` is required for the transparent notch overlay
 # (`app.macOSPrivateApi` in tauri.conf.json is only a declaration; the runtime
 # transparency call is compiled out without this cargo feature).
-tauri = { version = "2.11.5", features = ["macos-private-api"] }
+#
+# Step W0: `tray-icon` enables the menu-bar status item that opens the panel
+# windows (accessory apps have no Dock icon, so the tray is their only chrome).
+tauri = { version = "2.11.5", features = ["macos-private-api", "tray-icon"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+
+# Step W3: the Touch ID gate binds an approval to the exact unsigned XDR by its
+# SHA-256 digest, matching `payloadHashOfXdr` in the agent (W1). `sha2`/`hex`
+# are the same versions already present transitively (see Cargo.lock).
+sha2 = "0.10"
+hex = "0.4"
 
 # Step A0: microphone capture (cpal) written to 16-bit PCM WAV (hound), and the
 # global push-to-talk shortcut. The plugin is desktop-only by design.
@@ -33,6 +42,23 @@ tauri-plugin-global-shortcut = "2.3"
 # (no bundled crypto), and multipart bodies are built by hand (see stt/groq.rs)
 # so the exact request shape is unit-testable.
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "native-tls"] }
+
+# Step W4b: the Freighter signing bridge. The one-shot loopback server is
+# `tiny_http` — a small, sync, blocking server with no async runtime and only a
+# few transitives (`ascii`, `chunked_transfer`, `httpdate`), which is the smallest
+# well-maintained option for a two-endpoint local server. The XDR is verified
+# without an XDR crate: `base64` decodes the envelope, `sha2`/`hex` compute the
+# transaction hash, and `ed25519-dalek` (audited) verifies the owner's signature.
+# `getrandom` mints the one-time token from the OS CSPRNG and `subtle` compares
+# tokens in constant time.
+#
+# `ed25519-dalek` is pinned to exactly 2.1.1: 2.2.0 raises the MSRV to 1.81,
+# above this crate's declared `rust-version = "1.77"` (2.1.1 needs 1.60).
+tiny_http = "0.12"
+ed25519-dalek = "=2.1.1"
+base64 = "0.23"
+getrandom = "0.3"
+subtle = "2.6"
 
 # The overlay's window level / collection behaviour come from AppKit directly,
 # because Tauri's window API does not expose them. Versions are pinned to the
@@ -47,7 +73,9 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSScreen", "NSWindow", "NSWorkspace", "NSRunningApplication"] }
 # `NSGeometry` carries NSPoint/NSRect/NSSize/NSEdgeInsets; `NSEnumerator`
 # unlocks NSArray::iter, used to scan screens for the notched display.
-objc2-foundation = { version = "0.3", features = ["NSEnumerator", "NSGeometry"] }
+# Step W3 adds `NSString`/`NSError` for the LocalAuthentication prompt and its
+# error mapping.
+objc2-foundation = { version = "0.3", features = ["NSEnumerator", "NSGeometry", "NSString", "NSError"] }
 # Step A1 on-device backend: the macOS Speech framework (`SFSpeechRecognizer`).
 # Same objc2 0.6.x generation as the app-kit/foundation crates above (see
 # `cargo tree -i objc2`); the default features are left on so the generated
@@ -55,11 +83,15 @@ objc2-foundation = { version = "0.3", features = ["NSEnumerator", "NSGeometry"] 
 # `objc2-core-media` come along as harmless same-generation transitives.
 # `block2` provides the result-handler block.
 objc2-speech = "0.3"
+# Step W3: the Touch ID / device-password approval gate
+# (`LAContext.evaluatePolicy`). Same objc2 0.6.x generation as the crates above.
+# Default features are turned off on purpose: they drag in `objc2-security`,
+# which this gate does not use (`evaluatePolicy` needs neither Keychain nor
+# access-control objects), and which is not otherwise linked by the app.
+objc2-local-authentication = { version = "0.3", default-features = false, features = ["std", "LABiometryType", "LAContext", "LAError", "block2"] }
 # Modifier-only Control+Option hold: an `NSEvent` flagsChanged monitor pair
 # needs the Objective-C block runtime (`block2`, already a default feature of
 # objc2-app-kit for NSEvent) and a CoreFoundation dictionary for the
 # Accessibility consent prompt.
 block2 = "0.6"
 core-foundation = "0.10"
-
-# Step A5 will add: security-framework (Keychain) + objc2-local-authentication (Touch ID).

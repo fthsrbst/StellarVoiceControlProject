@@ -8,12 +8,25 @@ import {
 
 import { runAgentTurn, type AgentOutcome } from "@/lib/agent";
 import { executeApprovedIntent } from "@/lib/chain";
-import { speakTurnResult } from "@/lib/speech";
+import { speakSentence, speakTurnResult } from "@/lib/speech";
+import { failureSentence, submittedSentence } from "@polaris/agent";
 import { TurnFlow } from "@/lib/turnFlow";
 import {
+  recordTurnAnswer,
+  recordTurnOutcome,
+  recordTurnStart,
+} from "@/lib/turnLog";
+import {
+  isActiveStage,
   isCurrentTurn,
+  isPaymentStage,
+  noticeLabel,
   reduceTurnSession,
+  shouldSurfaceOutcome,
+  stageLabel,
   stageWatchdog,
+  TOTAL_WATCHDOG_MS,
+  type PaymentStage,
   type TurnSession,
 } from "@/lib/turnSession";
 import { getCaptureStatus, getHotkeyPermission, listenPolarisEvents } from "@/lib/polaris";
@@ -50,17 +63,26 @@ const PERMISSION_HINT_MS = 8000;
 /**
  * Polaris notch overlay.
  *
- * Two ideas live together here since the A5/A6 merge:
+ * Two state machines live together here since the A5 merge, with one direction
+ * of authority between them:
  *
  * - The **voice chain** is one explicit turn session (`reduceTurnSession`). A
  *   turn begins when the hotkey goes down and ends once — after the answer has
- *   been spoken, or after a failure label has had its dwell. In between the
- *   shell stays expanded, moving `listening -> thinking -> speaking` with no
- *   intermediate collapse.
- * - The **notch shell** resolves that voice proposal against its own
- *   hover/prompt sources and owns every pixel: one surface, one state table.
- *   The speaking stage is a status-strip state, so it maps to the `compact` row
- *   exactly like `recording`/`transcribing`.
+ *   been spoken, or after a failure label has had its dwell. In between it moves
+ *   `listening -> thinking -> speaking` (and, for a payment, through
+ *   `awaiting_approval -> signing -> submitting` before the confirmation
+ *   speech) with no intermediate collapse; F1 makes those stages visible and
+ *   gives each its own watchdog, so the notch cannot close while value moves.
+ * - The **notch shell** (`ShellSurface` + `useShellState`) resolves that voice
+ *   proposal against its own hover/prompt sources and owns every pixel: one
+ *   surface, one state table. App is the bridge — it maps the turn session onto
+ *   the shell's `visual`/`voiceState`/`voiceAttention` inputs (below) and never
+ *   lets the shell derive turn state of its own. Hover/panel and the latched
+ *   double-Control prompt stay shell-only sources.
+ *
+ * The typed prompt is not a shortcut around this seam: `PromptPanel` runs the
+ * same `runAgentTurn` and, for a produced intent, the same `executeApprovedIntent`
+ * gate before anything is added to the (mock) answer.
  */
 export default function App() {
   const [status, setStatus] = useState<CaptureStatus>(IDLE_STATUS);
@@ -79,14 +101,28 @@ export default function App() {
   const sessionRef = useRef<TurnSession | null>(session);
   sessionRef.current = session;
 
-  // A failed turn stays up for its dwell, then a single `settled` ends it. The
-  // effect is keyed on the session id so a new failure re-arms while a re-render
-  // of the same failure does not (so it settles exactly once).
+  // A terminal turn stays up for its dwell, then a single `settled` ends it: the
+  // failure label gets `FAILURE_DWELL_MS`, a healthy `done` collapses at once
+  // (the answer has already been spoken). Keyed on the session id so a new
+  // terminal stage re-arms while a re-render of the same one does not — it
+  // settles exactly once.
   useEffect(() => {
-    if (session?.stage !== "failed") return;
-    const timer = setTimeout(() => dispatchTurn({ type: "settled" }), FAILURE_DWELL_MS);
+    if (session?.stage !== "error" && session?.stage !== "done") return;
+    const dwell = session.stage === "error" ? FAILURE_DWELL_MS : 0;
+    const timer = setTimeout(() => dispatchTurn({ type: "settled" }), dwell);
     return () => clearTimeout(timer);
   }, [session?.id, session?.stage]);
+
+  // F1: one ceiling for the whole turn, so a payment path that shuffles between
+  // (individually bounded) stages cannot hold the notch open indefinitely.
+  useEffect(() => {
+    if (session === null || !isActiveStage(session.stage)) return;
+    const timer = setTimeout(
+      () => dispatchTurn({ type: "failed", label: "Timed out" }),
+      TOTAL_WATCHDOG_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [session?.id]);
 
   // Stuck-stage watchdog (M4): both bounded stages are watched — the pre-speech
   // wait AND `speaking`, so a wedged player cannot hold the shell open forever.
@@ -131,10 +167,24 @@ export default function App() {
     };
 
     const runFromTranscript = (raw: string, language?: string): void => {
+      // F1: while a payment is awaiting approval, signing or submitting, a take
+      // that slipped through the (refused) hotkey must not start a superseding
+      // agent turn. The pending payment takes priority until it settles.
+      const pending = sessionRef.current?.stage;
+      if (pending !== undefined && isPaymentStage(pending)) {
+        console.warn("ignoring a transcript while a payment is pending");
+        return;
+      }
       const admission = flowRef.current.offer(raw);
       if (admission.kind === "ignore") return;
       const { ticket } = admission;
       const current = (): boolean => flowRef.current.isCurrent(ticket);
+      // NW4: the local turn log records the turn from start to outcome, so the
+      // History page can show turns the chain never saw. No XDR is ever stored.
+      const logId = recordTurnStart(ticket.transcript);
+      // The STT-detected language labels the notch stages until the agent reports
+      // the reconciled language below.
+      dispatchTurn({ type: "language", language: language ?? null });
       // The agent core emits `agent_status: thinking` at the exact moment it
       // takes the transcript; that event — not this call — enters the thinking
       // stage. Nothing here may jump ahead to "speaking": that is raised only by
@@ -157,9 +207,14 @@ export default function App() {
           if (!run.ok) {
             // Only the short label reaches the notch; the full detail is already
             // on the console and in the Rust log.
+            recordTurnOutcome(logId, { label: `failed: ${run.failure.label}` });
             dispatchTurn({ type: "failed", label: run.failure.label });
             return;
           }
+          // The model's reconciled language is the authoritative one for the
+          // reply/voice (A14), so it also drives the notch labels from here on.
+          dispatchTurn({ type: "language", language: run.outcome.language ?? null });
+          recordTurnAnswer(logId, run.outcome.answer);
           if (!run.outcome.intent) {
             // A conversational turn has nothing to execute: speak the answer and
             // let the real `speech_status` stream end the turn.
@@ -168,32 +223,66 @@ export default function App() {
           }
           // A produced intent goes down the single A9 execution seam (approval
           // gate → chain tool) before anything is spoken. The confirmation is
-          // spoken only once an unsigned transaction exists; while Owner B's
-          // tools are `NotImplementedError` stubs, the notch says so plainly and
-          // settles instead of hanging.
+          // spoken only once the transaction is signed/submitted; a failure is
+          // announced with its real label.
           //
           // M1: bind the outcome to the turn that dispatched it. If a newer turn
           // is on screen by the time execution resolves, this result is stale and
           // must not overwrite the newer turn's UI — the same rule the speech
           // path applies.
           const turnId = sessionRef.current?.id;
-          void executeApprovedIntent(run.outcome.intent)
+          // Capture the narrowed intent: TypeScript does not carry the `if`
+          // narrowing into the async closure below.
+          const intent = run.outcome.intent;
+          // F1: the approval gate and the sign/submit path report their real
+          // boundaries here, so the notch wears the matching stage for the whole
+          // (human-paced) wait instead of the generic "Thinking".
+          const onStage = (stage: PaymentStage): void => {
+            if (disposed || !isCurrentTurn(sessionRef.current, turnId)) return;
+            dispatchTurn({ type: "stage", stage });
+          };
+          void executeApprovedIntent(intent, { onStage })
             .then((outcome) => {
-              if (disposed || !isCurrentTurn(sessionRef.current, turnId)) return;
-              if (outcome.status === "executed") {
-                console.info(
-                  "chain tool produced an unsigned transaction",
-                  outcome.result?.summary,
-                );
-                speakWithSettle(run.outcome);
+              if (disposed) return;
+              // M1: a non-submitted stale result is still dropped. W4b-2: a tx
+              // that actually reached the network is always surfaced, even if a
+              // watchdog settled the turn as failed first (MAJOR-1).
+              const submitted = outcome.status === "executed" && outcome.txHash !== undefined;
+              if (!shouldSurfaceOutcome(sessionRef.current, turnId, submitted)) return;
+              if (submitted) {
+                // W4b: the signed transaction reached the network. Announce the
+                // real result (not the pre-approval confirmation) and let the
+                // real `speech_status` stream end the turn.
+                recordTurnOutcome(logId, {
+                  label: "tx_submitted",
+                  txHash: outcome.txHash,
+                  explorerUrl: outcome.explorerUrl ?? null,
+                });
+                console.info("transaction submitted", outcome.explorerUrl);
+                const sentence = submittedSentence(intent, run.outcome.language);
+                speakSentence(sentence, run.outcome.language, (error) => {
+                  console.warn("speech produced no audio; settling the turn", error);
+                  if (isCurrentTurn(sessionRef.current, turnId)) {
+                    dispatchTurn({ type: "failed", label: "Voice error" });
+                  }
+                });
               } else {
+                // A deny, wallet refusal, timeout, integrity or submit failure:
+                // a short spoken line plus the visible label.
                 console.warn(`execution ${outcome.status}: ${outcome.detail ?? ""}`);
-                dispatchTurn({ type: "failed", label: outcome.label ?? "Chain error" });
+                const label = outcome.label ?? "Chain error";
+                recordTurnOutcome(logId, { label: `failed: ${label}` });
+                speakSentence(
+                  failureSentence(label, run.outcome.language),
+                  run.outcome.language,
+                );
+                dispatchTurn({ type: "failed", label });
               }
             })
             .catch((error: unknown) => {
               if (disposed || !isCurrentTurn(sessionRef.current, turnId)) return;
               console.error("execution seam failed unexpectedly", error);
+              recordTurnOutcome(logId, { label: "failed: Chain error" });
               dispatchTurn({ type: "failed", label: "Chain error" });
             });
         })
@@ -293,70 +382,69 @@ export default function App() {
 
   // The voice source's visual name. It reuses the shell's existing `state-*`
   // language: capture's `recording`/`transcribing` names stay the selectors for
-  // the listening and thinking stages, the speaking stage has its own name (the
-  // same indicator treatment), and a failed session borrows the error treatment.
-  // (A9 removed the `checking` stage: the intent-validation step is synchronous
-  // and unreadable, so no label is flashed for it.)
+  // the listening and thinking stages, the speaking stage has its own name, and
+  // a failed session borrows the error treatment. The F1 payment stages borrow
+  // `transcribing` on purpose: they are all "Polaris is working" and the label
+  // carries the meaning, so no new CSS state is needed.
   const visual =
-    connectionError || session?.stage === "failed"
+    connectionError || session?.stage === "error"
       ? "error"
       : session?.stage === "listening"
         ? "recording"
-        : session?.stage === "thinking"
-          ? "transcribing"
-          : session?.stage === "speaking"
-            ? "speaking"
+        : session?.stage === "speaking"
+          ? "speaking"
+          : session !== null
+            ? "transcribing"
             : "idle";
 
-  // The shell is expanded for the whole of a live turn, and only a live turn
-  // (plus a connection in progress or the one-time permission hint) expands it.
-  const expanded = visual !== "idle" || !connected || showPermissionHint;
+  // The shell is expanded for the whole of a live turn — including its terminal
+  // stage, until the dwell collapses it — plus a connection in progress or the
+  // one-time permission hint. Deriving this from `session !== null` (not from
+  // the visual) is what keeps `done`/`error` from collapsing a frame early.
+  const expanded = session !== null || connectionError !== null || !connected || showPermissionHint;
 
-  // The voice source only outranks hover while it is an attention state the
-  // user must see (listening, thinking, speaking, a permission hint, a
-  // connection error). During a failure's dwell it only keeps the label up, so
-  // hover must still be able to open the panel instead of being locked out for
-  // the whole dwell (MINOR-1).
+  // The voice source only outranks hover while it is an attention state the user
+  // must see (listening/thinking/speaking, a pending payment, a permission hint,
+  // a connection error). During a terminal dwell it only keeps the label up, so
+  // hover can still open the panel instead of being locked out for the whole
+  // dwell (MINOR-1). `isActiveStage` is exactly that attention set.
   const voiceAttention =
     connectionError !== null ||
     !connected ||
     showPermissionHint ||
-    session?.stage === "listening" ||
-    session?.stage === "thinking" ||
-    session?.stage === "speaking";
+    (session !== null && isActiveStage(session.stage));
 
   // The label is the ONLY thing drawn in the left ear, so it has to stay short:
   // the ear is deliberately narrow and anything longer would be clipped (it can
   // never spill right, because that is the camera housing). The full wording
-  // still reaches assistive tech through the live region below.
+  // still reaches assistive tech through the live region below. Labels follow the
+  // turn's language; an `error` keeps the outcome's own short label.
   const label = connectionError
     ? "Reconnecting"
-    : session?.stage === "failed"
-      ? (session.failureLabel ?? "Error")
-      : session?.stage === "listening"
-        ? "Listening"
-        : session?.stage === "thinking"
-          ? "Thinking"
-          : session?.stage === "speaking"
-            ? "Speaking"
-            : showPermissionHint
-              ? "Grant access"
-              : connected
-                ? "Ready"
-                : "Connecting";
+    : session === null
+      ? showPermissionHint
+        ? "Grant access"
+        : connected
+          ? "Ready"
+          : "Connecting"
+      : session.notice !== null
+        ? noticeLabel(session.notice, session.language)
+        : session.stage === "error"
+          ? (session.failureLabel ?? stageLabel("error", session.language))
+          : stageLabel(session.stage, session.language);
   const detail = connectionError
     ? "Reconnecting…"
-    : session?.stage === "failed"
+    : session?.stage === "error"
       ? "⌃⌥ to retry"
       : session?.stage === "listening"
         ? "Release to finish"
-        : session?.stage === "thinking"
-          ? "Working…"
-          : session?.stage === "speaking"
-            ? "Polaris is talking"
+        : session?.stage === "speaking"
+          ? "Polaris is talking"
+          : session !== null
+            ? "Working…"
             : showPermissionHint
-                ? "System Settings › Privacy & Security › Accessibility"
-                : "Starting up…";
+              ? "System Settings › Privacy & Security › Accessibility"
+              : "Starting up…";
   const error = connectionError ?? status.error;
 
   return (

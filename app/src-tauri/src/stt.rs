@@ -114,6 +114,305 @@ fn language_name_to_code(value: &str) -> Option<&'static str> {
     Some(code)
 }
 
+/// `POLARIS_STT_PROMPT` — overrides or disables the vocabulary hint.
+pub const PROMPT_ENV: &str = "POLARIS_STT_PROMPT";
+
+/// `POLARIS_STT_ALLOWED_LANGS` — the languages a detection may keep without a retry.
+pub const ALLOWED_LANGS_ENV: &str = "POLARIS_STT_ALLOWED_LANGS";
+
+/// `POLARIS_ALIASES` — only the alias **names** are read, for the vocabulary hint.
+pub const ALIASES_ENV: &str = "POLARIS_ALIASES";
+
+/// The English-only vocabulary hint, used when the language is forced to `en`.
+///
+/// Written as ONE natural sentence rather than a bare word list: Whisper echoes
+/// a comma-separated vocabulary back on short clips (F3-fix), but a sentence is
+/// read as context. Kept well under the ~200-token guidance.
+pub const DEFAULT_PROMPT_EN: &str = "Send 10 XLM from acc1 to acc2.";
+
+/// The Turkish-only vocabulary hint, used when the language is forced to `tr`.
+pub const DEFAULT_PROMPT_TR: &str = "acc1'den acc2'ye 10 XLM gönder.";
+
+/// The short bilingual hint used when no language is forced.
+///
+/// A forced language must never see the other language's words (that is exactly
+/// what leaked Turkish into the owner's English clip); auto-detection gets both.
+pub const DEFAULT_PROMPT: &str =
+    "Send 10 XLM from acc1 to acc2. acc1'den acc2'ye 10 XLM gönder.";
+
+/// The languages a built-in vocabulary hint can be written in (F3-fix).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptLanguage {
+    English,
+    Turkish,
+    Bilingual,
+}
+
+/// Chooses the hint language from the forced `POLARIS_STT_LANGUAGE`.
+///
+/// `en`/`tr` (any region suffix) pick that language only; anything else —
+/// including auto-detection (`None`) — keeps the short bilingual hint.
+pub fn prompt_language(forced_language: Option<&str>) -> PromptLanguage {
+    let Some(value) = forced_language.map(str::trim).filter(|value| !value.is_empty()) else {
+        return PromptLanguage::Bilingual;
+    };
+    match value.split('-').next().unwrap_or(value).to_lowercase().as_str() {
+        "en" => PromptLanguage::English,
+        "tr" => PromptLanguage::Turkish,
+        _ => PromptLanguage::Bilingual,
+    }
+}
+
+/// Builds the vocabulary hint in the language actually in use, plus the
+/// recipient alias names. Aids the decoder with the exact words; contains no
+/// address or secret.
+pub fn build_prompt(aliases: &[String], forced_language: Option<&str>) -> String {
+    let language = prompt_language(forced_language);
+    let base = match language {
+        PromptLanguage::English => DEFAULT_PROMPT_EN,
+        PromptLanguage::Turkish => DEFAULT_PROMPT_TR,
+        PromptLanguage::Bilingual => DEFAULT_PROMPT,
+    };
+    if aliases.is_empty() {
+        return base.to_string();
+    }
+    let recipients = match language {
+        PromptLanguage::Turkish => format!("Alıcılar {}.", join_names(aliases, "ve")),
+        PromptLanguage::English | PromptLanguage::Bilingual => {
+            format!("Recipients are {}.", join_names(aliases, "and"))
+        }
+    };
+    format!("{base} {recipients}")
+}
+
+/// Joins recipient names the way the sentence needs (`a and b`, `a ve b`).
+fn join_names(names: &[String], conjunction: &str) -> String {
+    match names {
+        [] => String::new(),
+        [only] => only.clone(),
+        [rest @ .., last] => format!("{} {conjunction} {last}", rest.join(", ")),
+    }
+}
+
+/// Alias **names** from a `POLARIS_ALIASES` value (`alias=G...` pairs).
+///
+/// Only the left-hand side of each pair is read, so an address can never leak
+/// into a request body through the vocabulary hint. Blank names are dropped and
+/// a repeated name is kept once.
+pub fn alias_names(raw: Option<&str>) -> Vec<String> {
+    let Some(raw) = raw else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = Vec::new();
+    for entry in raw.split(',') {
+        let Some((name, _address)) = entry.split_once('=') else {
+            continue;
+        };
+        let name = name.trim();
+        if !name.is_empty() && !names.iter().any(|seen| seen == name) {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+/// Resolves the transcription prompt from [`PROMPT_ENV`].
+///
+/// `off` disables the hint entirely; any other non-empty value replaces the
+/// built-in vocabulary verbatim; unset/blank builds the language-appropriate
+/// [`DEFAULT_PROMPT_EN`]/[`DEFAULT_PROMPT_TR`]/[`DEFAULT_PROMPT`] plus the alias
+/// names seen in the environment.
+pub fn resolve_prompt(
+    raw: Option<&str>,
+    aliases: &[String],
+    forced_language: Option<&str>,
+) -> Option<String> {
+    match raw.map(str::trim).filter(|value| !value.is_empty()) {
+        None => Some(build_prompt(aliases, forced_language)),
+        Some(value) if value.eq_ignore_ascii_case("off") => None,
+        Some(value) => Some(value.to_string()),
+    }
+}
+
+/// The languages a detection may keep without a retry (F3).
+///
+/// `POLARIS_STT_ALLOWED_LANGS` is a comma-separated list of ISO-639-1 codes;
+/// unset/blank defaults to Turkish and English, the two languages commands are
+/// spoken in. The first entry is also the forced-retry language.
+pub fn parse_allowed_languages(raw: Option<&str>) -> Vec<String> {
+    let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+        return vec!["tr".to_string(), "en".to_string()];
+    };
+    raw.split(',')
+        .map(|entry| entry.trim().to_lowercase())
+        .filter(|entry| !entry.is_empty())
+        .collect()
+}
+
+/// What to do with the first response's detected language.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LanguageDecision {
+    /// Trust the result as returned.
+    Accept,
+    /// Re-run the same audio once with this forced language.
+    Retry(String),
+}
+
+/// Applies the language policy to a first detection (F3).
+///
+/// A forced `POLARIS_STT_LANGUAGE` is already in force, so its result is
+/// accepted unchanged. Otherwise a detection whose base
+/// tag is in `allowed` is accepted; anything else — including an unknown
+/// detection, which is exactly what a hallucinated short clip produces — is
+/// retried once in the first allowed language. An empty allowed list has nothing
+/// to retry into, so it accepts.
+pub fn decide_language(
+    forced: Option<&str>,
+    detected: Option<&str>,
+    allowed: &[String],
+) -> LanguageDecision {
+    if forced.is_some() {
+        return LanguageDecision::Accept;
+    }
+    let Some(retry_language) = allowed.first() else {
+        return LanguageDecision::Accept;
+    };
+    let allowed_detection = detected.is_some_and(|tag| {
+        let base = tag.split('-').next().unwrap_or(tag);
+        allowed.iter().any(|language| language == base)
+    });
+    if allowed_detection {
+        LanguageDecision::Accept
+    } else {
+        LanguageDecision::Retry(retry_language.clone())
+    }
+}
+
+/// Short clips are where Whisper's decoder invents text. Both the known-phrase
+/// and the prompt-echo filters only distrust transcripts below this length.
+pub const SHORT_CLIP_MS: u64 = 3_000;
+
+/// Phrases Whisper emits from noise rather than speech, matched after trimming,
+/// lowercasing and stripping surrounding punctuation.
+const HALLUCINATION_PHRASES: &[&str] = &[
+    "you",
+    "thank you",
+    "thanks",
+    "thanks for watching",
+    "please subscribe",
+    "bye",
+    "okay",
+    "ok",
+    "hmm",
+    "uh",
+    "um",
+    "yeah",
+];
+
+/// Whether `text` is junk that must not become a command (F3).
+///
+/// Blank text is always junk. A known hallucination phrase only counts for a
+/// short clip, where there is too little signal to trust the decoder; the same
+/// words in a longer utterance are a real (if useless) sentence.
+pub fn is_hallucination(text: &str, duration_ms: u64) -> bool {
+    let normalized = text
+        .trim()
+        .trim_matches(|character: char| character.is_ascii_punctuation() || character == '…')
+        .to_lowercase();
+    if normalized.is_empty() {
+        return true;
+    }
+    duration_ms < SHORT_CLIP_MS && HALLUCINATION_PHRASES.contains(&normalized.as_str())
+}
+
+/// Lowercase alphanumeric words, so punctuation and spacing never defeat a
+/// comparison between a transcript and the prompt.
+fn words(text: &str) -> Vec<String> {
+    text.split(|character: char| !character.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(|word| word.to_lowercase())
+        .collect()
+}
+
+/// The shortest literal run of the prompt that counts as an echo.
+const MIN_ECHO_RUN: usize = 12;
+
+/// Whether the transcript contains a literal run of at least [`MIN_ECHO_RUN`]
+/// characters from the prompt, ignoring punctuation and spacing.
+fn contains_prompt_run(text: &str, prompt: &str) -> bool {
+    let transcript = words(text).join(" ");
+    let prompt = words(prompt).join(" ");
+    if transcript.len() < MIN_ECHO_RUN || prompt.len() < MIN_ECHO_RUN {
+        return false;
+    }
+    (0..=prompt.len() - MIN_ECHO_RUN).any(|start| {
+        let end = start + MIN_ECHO_RUN;
+        // Multi-byte windows are skipped; the prompt is Latin/ASCII in practice.
+        prompt.is_char_boundary(start)
+            && prompt.is_char_boundary(end)
+            && transcript.contains(&prompt[start..end])
+    })
+}
+
+/// Whether `text` is the vocabulary prompt echoed back rather than speech
+/// (F3-fix).
+///
+/// On a short clip Whisper sometimes decodes the `prompt` itself, which the
+/// owner saw as `Recipients, cüzdan, hizmet, bakiye.` for an English clip. The
+/// tells are that most of the transcript's words come from the prompt, or the
+/// transcript contains a long literal run of it. A transcript that states an
+/// amount is a real command and is never filtered this way — the prompt is an
+/// example command, so it shares its opening words with genuine ones. An amount
+/// is a word that starts with a digit (`10`, `10xlm`), not an alias like `acc1`.
+pub fn is_prompt_echo(text: &str, prompt: Option<&str>, duration_ms: u64) -> bool {
+    let Some(prompt) = prompt else {
+        return false;
+    };
+    if duration_ms >= SHORT_CLIP_MS {
+        return false;
+    }
+    let transcript = words(text);
+    if transcript.is_empty() {
+        return false;
+    }
+    if transcript
+        .iter()
+        .any(|word| word.chars().next().is_some_and(|character| character.is_ascii_digit()))
+    {
+        return false;
+    }
+    if contains_prompt_run(text, prompt) {
+        return true;
+    }
+    let prompt_words = words(prompt);
+    if prompt_words.is_empty() {
+        return false;
+    }
+    let echoed = transcript
+        .iter()
+        .filter(|word| prompt_words.contains(word))
+        .count();
+    // 60% in integer arithmetic: echoed / total >= 3 / 5.
+    echoed * 5 >= transcript.len() * 3
+}
+
+/// Whether a transcript the provider labelled in one language contradicts a
+/// forced language (F3-fix).
+///
+/// Only meaningful when a language is forced and the provider reported one: an
+/// unknown detection cannot prove a mismatch, so it is not rejected here. This
+/// is what catches the owner's Turkish vocabulary on an English-forced clip.
+pub fn language_mismatch(forced: Option<&str>, detected: Option<&str>) -> bool {
+    let Some(forced) = forced.map(str::trim).filter(|value| !value.is_empty()) else {
+        return false;
+    };
+    let Some(detected) = detected else {
+        return false;
+    };
+    let base = |tag: &str| tag.split('-').next().unwrap_or(tag).to_lowercase();
+    base(forced) != base(detected)
+}
+
 /// Everything that can go wrong between "a WAV exists" and "a transcript
 /// exists".
 ///
@@ -132,6 +431,9 @@ pub enum SttError {
     Silent,
     /// Shorter than [`wav::MIN_DURATION_MS`].
     TooShort { duration_ms: u64 },
+    /// A very short clip produced a known hallucination phrase (F3). Junk must
+    /// become a short overlay label, never an agent turn.
+    Hallucination { text: String },
     /// Could not reach the provider (DNS, TLS, timeout, connection reset).
     Network(String),
     /// The provider answered with a non-2xx status.
@@ -161,7 +463,7 @@ impl SttError {
         match self {
             Self::MissingKey => "No STT key",
             Self::Wav(_) | Self::Empty => "Bad audio",
-            Self::Silent => "No speech",
+            Self::Silent | Self::Hallucination { .. } => "No speech",
             Self::TooShort { .. } => "Too short",
             Self::Network(_) => "Net error",
             Self::Http { .. } => "STT error",
@@ -188,6 +490,10 @@ impl SttError {
             Self::TooShort { duration_ms } => format!(
                 "the recording is only {duration_ms} ms; at least {} ms is required",
                 wav::MIN_DURATION_MS
+            ),
+            Self::Hallucination { text } => format!(
+                "the clip is too short to contain speech, but the provider returned {text:?}; \
+                 treated as a hallucination and not forwarded"
             ),
             Self::Network(message) => format!("could not reach the transcription service: {message}"),
             Self::Http { status, detail } => {
@@ -231,6 +537,20 @@ pub trait Transcriber: Send + Sync {
     /// existing implementation or call site had to change.
     fn name(&self) -> &'static str {
         "stt"
+    }
+
+    /// The vocabulary prompt sent to the provider, if any (F3-fix). The
+    /// prompt-echo filter compares the transcript against exactly this text;
+    /// a backend without a prompt (on-device) is never filtered this way.
+    fn prompt(&self) -> Option<&str> {
+        None
+    }
+
+    /// The language forced for this backend, if any (F3-fix). A transcript the
+    /// provider labelled in another language is rejected. `None` means
+    /// auto-detect, where no such check is possible.
+    fn forced_language(&self) -> Option<&str> {
+        None
     }
 }
 
@@ -289,6 +609,24 @@ impl Transcriber for FallbackTranscriber {
                 .unwrap_or("stt")
         } else {
             self.primary.name()
+        }
+    }
+
+    fn prompt(&self) -> Option<&str> {
+        if self.used_fallback.load(std::sync::atomic::Ordering::Relaxed) {
+            self.fallback.as_ref().and_then(|backend| backend.prompt())
+        } else {
+            self.primary.prompt()
+        }
+    }
+
+    fn forced_language(&self) -> Option<&str> {
+        if self.used_fallback.load(std::sync::atomic::Ordering::Relaxed) {
+            self.fallback
+                .as_ref()
+                .and_then(|backend| backend.forced_language())
+        } else {
+            self.primary.forced_language()
         }
     }
 }
@@ -417,8 +755,22 @@ pub fn transcribe_verified(
     backend: &dyn Transcriber,
     wav: &Path,
 ) -> Result<Transcription, SttError> {
-    wav::validate(wav)?;
-    backend.transcribe(wav)
+    let info = wav::validate(wav)?;
+    let transcription = backend.transcribe(wav)?;
+    // F3-fix: a short clip whose "transcript" is a decoder hallucination or the
+    // vocabulary prompt echoed back is silence in disguise, not a command; and a
+    // transcript the provider labelled in another language contradicts a forced
+    // language. Reject all of them after the backend (which is where the text
+    // first exists) but before the agent ever sees it.
+    if is_hallucination(&transcription.text, info.duration_ms)
+        || is_prompt_echo(&transcription.text, backend.prompt(), info.duration_ms)
+        || language_mismatch(backend.forced_language(), transcription.language.as_deref())
+    {
+        return Err(SttError::Hallucination {
+            text: transcription.text,
+        });
+    }
+    Ok(transcription)
 }
 
 /// Starts the STT worker. Returns immediately; all work happens on the new
@@ -534,6 +886,8 @@ mod tests {
         result: Mutex<Option<Result<Transcription, SttError>>>,
         calls: Mutex<usize>,
         name: &'static str,
+        prompt: Option<String>,
+        forced_language: Option<String>,
     }
 
     impl FakeTranscriber {
@@ -542,11 +896,23 @@ mod tests {
                 result: Mutex::new(Some(result)),
                 calls: Mutex::new(0),
                 name: "stt",
+                prompt: None,
+                forced_language: None,
             }
         }
 
         fn named(mut self, name: &'static str) -> Self {
             self.name = name;
+            self
+        }
+
+        fn with_prompt(mut self, prompt: &str) -> Self {
+            self.prompt = Some(prompt.to_string());
+            self
+        }
+
+        fn with_forced_language(mut self, language: &str) -> Self {
+            self.forced_language = Some(language.to_string());
             self
         }
     }
@@ -563,6 +929,14 @@ mod tests {
 
         fn name(&self) -> &'static str {
             self.name
+        }
+
+        fn prompt(&self) -> Option<&str> {
+            self.prompt.as_deref()
+        }
+
+        fn forced_language(&self) -> Option<&str> {
+            self.forced_language.as_deref()
         }
     }
 
@@ -666,6 +1040,9 @@ mod tests {
             SttError::Empty,
             SttError::Silent,
             SttError::TooShort { duration_ms: 12 },
+            SttError::Hallucination {
+                text: "Thank you".into(),
+            },
             SttError::Network("timeout".into()),
             SttError::Http {
                 status: 401,
@@ -697,6 +1074,220 @@ mod tests {
         // A language with no mapping is unknown, never a guess.
         assert_eq!(normalize_detected_language("klingon"), None);
         assert_eq!(normalize_detected_language("   "), None);
+    }
+
+    #[test]
+    fn the_prompt_language_follows_the_forced_language() {
+        // Auto/unset keeps the short bilingual hint.
+        assert_eq!(build_prompt(&[], None), DEFAULT_PROMPT);
+        assert_eq!(build_prompt(&[], Some("")), DEFAULT_PROMPT);
+        // A forced language gets ONLY its own words: the leak that echoed
+        // Turkish into an English clip must be impossible.
+        assert_eq!(build_prompt(&[], Some("en")), DEFAULT_PROMPT_EN);
+        assert_eq!(build_prompt(&[], Some("en-US")), DEFAULT_PROMPT_EN);
+        assert_eq!(build_prompt(&[], Some("tr")), DEFAULT_PROMPT_TR);
+        assert!(!DEFAULT_PROMPT_EN.contains("cüzdan"));
+        assert!(!DEFAULT_PROMPT_EN.contains("gönder"));
+        assert!(!DEFAULT_PROMPT_TR.contains("Send"));
+        // An unknown forced language falls back to the bilingual hint.
+        assert_eq!(build_prompt(&[], Some("de")), DEFAULT_PROMPT);
+    }
+
+    #[test]
+    fn the_prompt_names_the_recipients_in_a_sentence() {
+        let aliases = vec!["acc1".to_string(), "acc2".to_string()];
+        let english = build_prompt(&aliases, Some("en"));
+        assert_eq!(english, "Send 10 XLM from acc1 to acc2. Recipients are acc1 and acc2.");
+        let turkish = build_prompt(&aliases, Some("tr"));
+        assert!(turkish.contains("Alıcılar acc1 ve acc2."), "{turkish}");
+        let bilingual = build_prompt(&aliases, None);
+        assert!(bilingual.contains("Recipients are acc1 and acc2."), "{bilingual}");
+        // A single name is not joined with a conjunction.
+        assert!(build_prompt(&["acc1".to_string()], Some("en")).ends_with("Recipients are acc1."));
+    }
+
+    #[test]
+    fn alias_names_reads_only_the_left_hand_side() {
+        let aliases = alias_names(Some("acc1=GAAA, acc2=GBBB,broken, =GCCC,acc1=GDDD"));
+        assert_eq!(aliases, vec!["acc1".to_string(), "acc2".to_string()]);
+        assert!(alias_names(None).is_empty());
+    }
+
+    #[test]
+    fn the_prompt_can_be_overridden_or_disabled() {
+        let aliases = vec!["acc1".to_string()];
+        // Unset: the language-appropriate built-in hint plus the aliases.
+        assert_eq!(
+            resolve_prompt(None, &aliases, Some("en")),
+            Some(build_prompt(&aliases, Some("en")))
+        );
+        // `off` disables the hint entirely (case-insensitive, trimmed).
+        assert_eq!(resolve_prompt(Some(" off "), &aliases, None), None);
+        // Any other value is used verbatim.
+        assert_eq!(
+            resolve_prompt(Some("only xlm"), &aliases, Some("en")),
+            Some("only xlm".to_string())
+        );
+    }
+
+    #[test]
+    fn allowed_languages_default_to_turkish_then_english() {
+        assert_eq!(parse_allowed_languages(None), vec!["tr", "en"]);
+        assert_eq!(parse_allowed_languages(Some("  ")), vec!["tr", "en"]);
+        assert_eq!(
+            parse_allowed_languages(Some(" TR , en-US ,")),
+            vec!["tr", "en-us"]
+        );
+        // A list of separators only has nothing to retry into.
+        assert!(parse_allowed_languages(Some(",,")).is_empty());
+    }
+
+    #[test]
+    fn a_disallowed_detection_retries_once_in_the_first_allowed_language() {
+        let allowed = parse_allowed_languages(None);
+        // Russian is exactly the false detection from the owner's log.
+        assert_eq!(
+            decide_language(None, Some("ru"), &allowed),
+            LanguageDecision::Retry("tr".to_string())
+        );
+        // English (including a locale tag) is allowed as-is.
+        assert_eq!(decide_language(None, Some("en"), &allowed), LanguageDecision::Accept);
+        assert_eq!(
+            decide_language(None, Some("en-us"), &allowed),
+            LanguageDecision::Accept
+        );
+        // An unknown detection is the hallmark of a hallucinated short clip.
+        assert_eq!(
+            decide_language(None, None, &allowed),
+            LanguageDecision::Retry("tr".to_string())
+        );
+        // A forced language is already in force: never retried.
+        assert_eq!(
+            decide_language(Some("de"), Some("ru"), &allowed),
+            LanguageDecision::Accept
+        );
+        // Nothing to retry into: accept.
+        assert_eq!(decide_language(None, Some("ru"), &[]), LanguageDecision::Accept);
+    }
+
+    #[test]
+    fn a_short_clip_that_decoded_to_a_hallucination_is_not_a_command() {
+        // Known noise phrases on a short clip.
+        assert!(is_hallucination("Thank you.", 400));
+        assert!(is_hallucination("  YOU  ", 200));
+        assert!(is_hallucination("Thank you", 1_500));
+        // Blank text is junk at any length.
+        assert!(is_hallucination("", 5_000));
+        // A real command is never filtered by the phrase list.
+        assert!(!is_hallucination("iptal et", 2_500));
+    }
+
+    #[test]
+    fn the_vocabulary_prompt_echoed_back_is_rejected() {
+        let prompt = "Send 10 XLM from acc1 to acc2. Recipients are acc1 and acc2.";
+        // The shape the owner saw: a bare word list with no amount. The same
+        // mechanism catches it whatever the exact prompt text is.
+        assert!(is_prompt_echo(
+            "Recipients, cüzdan, hizmet, bakiye.",
+            Some("Recipients cüzdan hizmet bakiye"),
+            1_280
+        ));
+        // Most words drawn from the bilingual hint, and no amount.
+        assert!(is_prompt_echo("acc1'den acc2'ye XLM gönder", Some(DEFAULT_PROMPT), 1_000));
+        assert!(is_prompt_echo("Recipients are acc1 and acc2.", Some(prompt), 1_000));
+        // A long literal run of the prompt is enough on its own.
+        assert!(is_prompt_echo("acc1 to acc2 something", Some(prompt), 1_000));
+        // A real command with an amount is never an echo, however many prompt
+        // words it shares (the prompt is itself an example command).
+        assert!(!is_prompt_echo("send 10 XLM to acc2", Some(prompt), 1_000));
+        // A short real command without an amount but no prompt words is kept.
+        assert!(!is_prompt_echo("iptal et", Some(DEFAULT_PROMPT), 1_000));
+        // Longer clips are trusted: the filter only distrusts short ones.
+        assert!(!is_prompt_echo("Recipients are acc1 and acc2.", Some(prompt), 4_000));
+        // No prompt means nothing to echo.
+        assert!(!is_prompt_echo("Recipients are acc1 and acc2.", None, 1_000));
+    }
+
+    #[test]
+    fn a_transcript_in_another_language_than_forced_is_rejected() {
+        // The owner's English-forced clip came back labelled Turkish.
+        assert!(language_mismatch(Some("en"), Some("tr")));
+        assert!(language_mismatch(Some("en-US"), Some("tr")));
+        assert!(!language_mismatch(Some("en"), Some("en")));
+        assert!(!language_mismatch(Some("tr"), Some("tr-TR")));
+        // Auto-detect has no forced language to contradict.
+        assert!(!language_mismatch(None, Some("tr")));
+        // An unknown detection cannot prove a mismatch.
+        assert!(!language_mismatch(Some("en"), None));
+    }
+
+    #[test]
+    fn a_hallucination_is_rejected_before_the_transcript_reaches_the_agent() {
+        let dir = scratch("stt-hallucination");
+        let wav = dir.join("short.wav");
+        // 800 ms: past the pre-flight minimum, short enough to distrust.
+        write_wav(&wav, 8_000, 12_800, 16_000);
+
+        let backend = FakeTranscriber::returning(Ok(Transcription {
+            text: "Thank you.".into(),
+            language: None,
+        }));
+        assert_eq!(
+            transcribe_verified(&backend, &wav),
+            Err(SttError::Hallucination {
+                text: "Thank you.".into()
+            })
+        );
+        assert_eq!(*backend.calls.lock().unwrap(), 1);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_prompt_echo_or_forced_language_mismatch_never_reaches_the_agent() {
+        let dir = scratch("stt-echo");
+        let wav = dir.join("clip.wav");
+        write_wav(&wav, 8_000, 16_000, 16_000); // 1 s
+        let prompt = build_prompt(&["acc1".to_string(), "acc2".to_string()], Some("en"));
+
+        // The prompt echoed back on an English-forced clip (digit-free, so the
+        // amount exemption does not apply).
+        let backend = FakeTranscriber::returning(Ok(Transcription {
+            text: "Recipients are acc1 and acc2.".into(),
+            language: Some("en".into()),
+        }))
+        .with_prompt(&prompt)
+        .with_forced_language("en");
+        assert!(matches!(
+            transcribe_verified(&backend, &wav),
+            Err(SttError::Hallucination { .. })
+        ));
+
+        // A correct English transcript but a Turkish label.
+        let backend = FakeTranscriber::returning(Ok(Transcription {
+            text: "send 10 XLM to acc2".into(),
+            language: Some("tr".into()),
+        }))
+        .with_prompt(&prompt)
+        .with_forced_language("en");
+        assert!(matches!(
+            transcribe_verified(&backend, &wav),
+            Err(SttError::Hallucination { .. })
+        ));
+
+        // The same words with the right label and no echo pass.
+        let backend = FakeTranscriber::returning(Ok(Transcription {
+            text: "send 10 XLM to acc2".into(),
+            language: Some("en".into()),
+        }))
+        .with_prompt(&prompt)
+        .with_forced_language("en");
+        assert_eq!(
+            transcribe_verified(&backend, &wav).unwrap().text,
+            "send 10 XLM to acc2"
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

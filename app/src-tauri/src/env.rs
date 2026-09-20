@@ -15,12 +15,20 @@
 //! * A missing or malformed `.env` is not an error. The app must start anyway —
 //!   step A1 treats a missing `GROQ_API_KEY` as a runtime state ("No STT key"),
 //!   not a crash.
+//! * When the walk-up finds nothing (a Finder-launched `Polaris.app` starts with
+//!   `/` as its working directory), the macOS app-support file
+//!   `~/Library/Application Support/Polaris/.env` is used instead, so a
+//!   double-clicked bundle can still find its keys.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// The file name looked up while walking up the directory tree.
 const ENV_FILE: &str = ".env";
+
+/// The macOS app-support `.env`, relative to `$HOME`. A Finder launch cannot see
+/// a repository `.env`, so this is where a bundle owner drops a copy.
+const APP_SUPPORT_ENV: &str = "Library/Application Support/Polaris/.env";
 
 /// Parses a `.env` body into key/value pairs.
 ///
@@ -75,6 +83,22 @@ pub fn find(start: &Path) -> Option<PathBuf> {
     None
 }
 
+/// The macOS app-support `.env` for a given home directory. Nothing here creates
+/// the file or the directory; a missing one is simply not loaded.
+pub fn app_support_path(home: &Path) -> PathBuf {
+    home.join(APP_SUPPORT_ENV)
+}
+
+/// Chooses the `.env` to load: the nearest file walking up from `cwd`, else the
+/// macOS app-support fallback when it exists. Pure, so both branches are tested
+/// with temporary directories and no process-global state.
+pub fn locate(cwd: &Path, home: Option<&Path>) -> Option<PathBuf> {
+    if let Some(found) = find(cwd) {
+        return Some(found);
+    }
+    home.map(app_support_path).filter(|path| path.is_file())
+}
+
 /// Applies parsed entries through injected predicates/setters, skipping any key
 /// the caller reports as already present. Keeping the mutation outside makes the
 /// "real environment wins" rule testable without touching the process
@@ -91,14 +115,16 @@ where
     }
 }
 
-/// Loads the nearest `.env` (if any) into the process environment.
+/// Loads the nearest `.env` (if any) into the process environment, falling back
+/// to `~/Library/Application Support/Polaris/.env` when the walk-up finds none.
 ///
 /// Call once at startup, before any key is read. Safe to call repeatedly.
 pub fn load() {
     let Ok(cwd) = std::env::current_dir() else {
         return;
     };
-    let Some(path) = find(&cwd) else {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let Some(path) = locate(&cwd, home.as_deref()) else {
         return;
     };
     let Ok(contents) = std::fs::read_to_string(&path) else {
@@ -208,5 +234,47 @@ mod tests {
         assert_eq!(find(&nested), Some(root.join(ENV_FILE)));
 
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn falls_back_to_the_app_support_env_when_no_repo_env_exists() {
+        let home = temp_dir("env-home");
+        let app_dir = home.join("Library/Application Support/Polaris");
+        std::fs::create_dir_all(&app_dir).unwrap();
+        std::fs::write(app_dir.join(ENV_FILE), "A=1\n").unwrap();
+        let cwd = temp_dir("env-cwd"); // deliberately has no `.env`
+
+        assert_eq!(locate(&cwd, Some(&home)), Some(app_support_path(&home)));
+
+        std::fs::remove_dir_all(&home).unwrap();
+        std::fs::remove_dir_all(&cwd).unwrap();
+    }
+
+    #[test]
+    fn the_nearest_repo_env_wins_over_the_app_support_fallback() {
+        let home = temp_dir("env-home-pref");
+        let app_dir = home.join("Library/Application Support/Polaris");
+        std::fs::create_dir_all(&app_dir).unwrap();
+        std::fs::write(app_dir.join(ENV_FILE), "SOURCE=app-support\n").unwrap();
+        let root = temp_dir("env-repo-pref");
+        let nested = root.join("app").join("src-tauri");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(root.join(ENV_FILE), "SOURCE=repo\n").unwrap();
+
+        assert_eq!(locate(&nested, Some(&home)), Some(root.join(ENV_FILE)));
+
+        std::fs::remove_dir_all(&home).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn no_env_anywhere_is_none() {
+        let home = temp_dir("env-home-empty");
+        let cwd = temp_dir("env-cwd-empty");
+        assert_eq!(locate(&cwd, Some(&home)), None);
+        assert_eq!(locate(&cwd, None), None);
+
+        std::fs::remove_dir_all(&home).unwrap();
+        std::fs::remove_dir_all(&cwd).unwrap();
     }
 }

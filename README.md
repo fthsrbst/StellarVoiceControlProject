@@ -4,9 +4,9 @@
 > assistant for Stellar (hackathon track: Genesis, 19–20 Sep 2026).
 >
 > This README is refreshed by a dedicated agent at the end of every milestone
-> (see `AGENTS.md` §6). It describes the codebase as of **v0.1.0** plus **step A0**: the
-> chain layer (guard contract, keeper, anchor client) is real and tested on testnet, and the
-> voice pipeline captures audio — hold-to-talk and the notch overlay are wired, STT is not.
+> (see `AGENTS.md` §6). It describes the codebase as of **v0.1.0** on `integration/wallet`:
+> the voice pipeline, chain lane and wallet UI are wired end to end (hotkey → STT → agent →
+> spoken answer; approval → Touch ID → Freighter → submit). Live runs need a human on a Mac.
 
 Polaris is a voice-controlled Stellar assistant: hold a global hotkey, speak, and it
 answers and can act on Stellar — pay, schedule payments, move between TRY and USDC
@@ -123,14 +123,11 @@ npm run anchor:e2e -w @polaris/stellar -- --amount-try 50 --withdraw-usdc 1
 Details, verified live anchor behaviour, safety hardening and the mock-vs-mainnet table:
 `stellar/src/anchor/README.md`.
 
-### App and agent (skeleton)
+### App, panels and Debug panel
 
-The desktop shell already carries the typed `polaris-event` stream from Rust
-(`app/src-tauri/src/events.rs`) to the React log pane, and `agent/` runs a mock loop with
-a `noop` tool. Not wired yet: hotkey + microphone capture, speech-to-text, the real
-Anthropic tool-use model, speech output, screen reading, and the Touch ID approval gate;
-`sendPayment`, `swap` and `guardPolicy` in `stellar/src/index.ts` still throw
-`NotImplementedError`. Step order is tracked in `sprints.md`.
+`make setup` installs deps and `.env`; `make dev` runs the shell. There is no Dock icon — the
+menu-bar **tray** opens the panels and the **Debug panel** runs per-feature checks. See
+`docs/ui-panels.md`; the fail-closed signing path is `docs/freighter-bridge.md`.
 
 ## Setup and checks
 
@@ -179,14 +176,13 @@ long operations run under `caffeinate -i` per `AGENTS.md` §4. The desktop shell
   the physical notch (AppKit geometry), driven by `idle → recording → ready` events. Hold
   **Control+Option** to record (`control+option+space` also works), release to stop; `cpal` writes a 16-bit PCM WAV and
   microphone/permission failures surface as the overlay `error` state. Release never sends.
-- `app_info` (version/network) and the agent skeleton (tool registry + `noop` + `MockLlm`).
-- `polaris_guard` on testnet (rules, alias book, schedules), the off-chain keeper, and the
-  SEP-6 anchor client — see `contracts/DEPLOYED.md`.
+- The **voice pipeline** (hold-to-talk, STT, agent loop, spoken read-back) and the
+  **approval → signing path** (Touch ID gate, Freighter bridge, `tx_submitted` + explorer link).
+- `app_info`; `polaris_guard` on testnet, the keeper, the SEP-6 anchor client, P2P client and
+  the read-only SPP panel.
 
-**Not wired yet** (step order in `sprints.md`)
-- speech-to-text (`A1`), the real Anthropic tool-use model (`A2`), speech output (`A3`),
-  screen reading (`A4`), Touch ID approval + signing (`A5`),
-- the voice pipeline is not yet joined to the chain layer (`A5`).
+**Not wired yet:** screen reading (`A4`), the live protocol integration, value-moving SPP; live
+mic/Touch ID/Freighter and the P2P contract need a human/deployment.
 
 ## Security & secrets
 

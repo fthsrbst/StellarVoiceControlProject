@@ -6,11 +6,14 @@
  * command. Rust never formats an intent: there is exactly one place that turns a
  * structured result into words.
  *
- * Two rules from the task drive the shape below:
+ * Two rules drive the shape below:
  *
- * * A produced intent is spoken as a short **confirmation sentence** — the user
- *   hears what is about to happen and is asked to confirm. The raw JSON is never
- *   read aloud.
+ * * A produced intent still has a short **confirmation sentence** built here,
+ *   and the offline speak-preview path reads it aloud. The desktop shell no
+ *   longer speaks it before approval (W4b): it waits for the transaction to
+ *   reach the network and then says [`submittedSentence`] — or
+ *   [`failureSentence`] on a refusal — so the user hears the real outcome, not a
+ *   pre-approval prompt. The raw JSON is never read aloud.
  * * A turn without an intent is spoken as its **answer** (the clarification the
  *   model asked for, e.g. for off-topic or ambiguous input). Internal errors are
  *   *not* spoken at all; they already surface as a short UI label.
@@ -94,6 +97,69 @@ const CONFIRMATIONS: Record<string, Confirmation> = {
 export function confirmationSentence(intent: Intent, language?: string): string {
   const template = CONFIRMATIONS[languageBase(language) ?? ""] ?? CONFIRMATIONS.en;
   return template!(intent);
+}
+
+/**
+ * The post-submission report (W4b). Where [`confirmationSentence`] asks the user
+ * to authorise a transaction, this is what the shell says **after** the signed
+ * transaction reached the network — "Sent 10 XLM to acc2" — and what it says
+ * when the wallet declined. Both are short and localized, and both live here so
+ * there is still exactly one place that turns a structured result into words.
+ */
+type SubmissionReport = (intent: Intent) => string;
+
+const SUBMITTED: Record<string, SubmissionReport> = {
+  en: (intent) => {
+    const recipient = intent.recipient ?? intent.alias ?? "the recipient";
+    if (intent.kind === "send") {
+      return `Sent ${intent.amount} ${intent.asset} to ${recipient}.`;
+    }
+    return "Done.";
+  },
+  tr: (intent) => {
+    const recipient = intent.recipient ?? intent.alias ?? "alıcıya";
+    if (intent.kind === "send") {
+      return `${recipient} adresine ${intent.amount} ${intent.asset} gönderildi.`;
+    }
+    return "Tamamlandı.";
+  },
+};
+
+/**
+ * The sentence to speak once a transaction has been submitted, in `language`
+ * when a template exists and in English otherwise.
+ */
+export function submittedSentence(intent: Intent, language?: string): string {
+  const template = SUBMITTED[languageBase(language) ?? ""] ?? SUBMITTED.en;
+  return capSpokenText(template!(intent));
+}
+
+/**
+ * The short, localized sentences for the failure labels the signing path emits
+ * (`ExecutionOutcome.label`). An unrecognised label falls back to the label
+ * itself, so a new failure is still spoken rather than silently dropped.
+ */
+const FAILURE_SENTENCES: Record<string, Record<string, string>> = {
+  en: {
+    Cancelled: "Cancelled.",
+    "Not approved": "Cancelled.",
+    "Wallet didn't sign": "Wallet didn't sign.",
+    "Wallet timed out": "Wallet timed out.",
+    "Wrong network": "Wrong network.",
+  },
+  tr: {
+    Cancelled: "İptal edildi.",
+    "Not approved": "İptal edildi.",
+    "Wallet didn't sign": "Cüzdan imzalamadı.",
+    "Wallet timed out": "Cüzdan zaman aşımına uğradı.",
+    "Wrong network": "Yanlış ağ.",
+  },
+};
+
+/** A short spoken failure for a labelled outcome, in `language` when known. */
+export function failureSentence(label: string, language?: string): string {
+  const table = FAILURE_SENTENCES[languageBase(language) ?? ""] ?? FAILURE_SENTENCES.en;
+  return capSpokenText(table![label] ?? label);
 }
 
 /**

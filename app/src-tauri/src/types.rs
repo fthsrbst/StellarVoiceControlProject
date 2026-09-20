@@ -13,10 +13,18 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum IntentKind {
     Deposit,
+    Withdraw,
     Swap,
     Send,
     GuardPolicy,
     RawTx,
+    // P2P escrow (W8). The variants must exist here or the approval gate would
+    // reject a P2P intent before the Touch ID card could render it.
+    P2pOffer,
+    P2pAccept,
+    P2pConfirm,
+    P2pCancel,
+    P2pReclaim,
 }
 
 /// A structured value-moving request produced from a voice transcript.

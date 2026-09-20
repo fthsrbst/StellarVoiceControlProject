@@ -2,7 +2,7 @@ import type { Intent } from "@polaris/interfaces";
 import { AgentError, isAgentError } from "./errors.ts";
 import type { PolarisEventBus } from "./events.ts";
 import { resolveTurnLanguage } from "./language.ts";
-import { POLARIS_SYSTEM_PROMPT, withDetectedLanguage } from "./prompt.ts";
+import { POLARIS_SYSTEM_PROMPT, withClock, withDetectedLanguage } from "./prompt.ts";
 import type { AgentTool, ToolContext, ToolRegistry } from "./tools/registry.ts";
 
 /** A single tool invocation requested by the model. */
@@ -77,6 +77,17 @@ export interface AgentTurnResult {
 /** Short human summary of an intent; the UI's single-line intent display. */
 export function describeIntent(intent: Intent): string {
   const recipient = intent.recipient ?? intent.alias ?? "(unknown recipient)";
+  if (intent.kind === "cancel_schedule") {
+    return intent.scheduleId !== undefined
+      ? `Cancel scheduled payment #${intent.scheduleId}.`
+      : `Cancel the scheduled payment to ${recipient}.`;
+  }
+  if (intent.kind === "schedule_payment") {
+    const when = intent.firstRun
+      ? ` starting ${intent.firstRun.localDate} ${intent.firstRun.localTime}`
+      : "";
+    return `Schedule ${intent.amount} ${intent.asset} to ${recipient}${when}.`;
+  }
   return `Send ${intent.amount} ${intent.asset} to ${recipient}.`;
 }
 
@@ -86,8 +97,10 @@ export function describeIntent(intent: Intent): string {
  * Behaviour (step A2):
  *
  * * The model sees the tool registry and either asks for a tool or answers.
- * * A **non-approval** tool (`noop`) runs and its result is fed into the answer —
- *   this is the round-trip proof.
+ * * A **non-approval** tool (`noop`, `get_balance`) runs and its result is fed
+ *   into the answer — the round-trip proof. A tool with a `toSpeech` form
+ *   (`get_balance`) supplies the spoken sentence directly, so no JSON is read
+ *   aloud and no second model turn is made.
  * * An **approval-gated** tool (`send_payment`) is never executed: its arguments
  *   are validated into an `Intent` and returned. Nothing in A2 reaches the
  *   chain, and no value moves.
@@ -103,9 +116,10 @@ export async function runTurn(options: AgentTurnOptions): Promise<AgentTurnResul
     transcript,
     ...options.toolContext,
   };
-  const system = withDetectedLanguage(
-    options.system ?? POLARIS_SYSTEM_PROMPT,
-    options.transcriptLanguage,
+  const system = withClock(
+    withDetectedLanguage(options.system ?? POLARIS_SYSTEM_PROMPT, options.transcriptLanguage),
+    options.toolContext?.now ?? new Date(),
+    options.toolContext?.timeZone,
   );
 
   try {
@@ -125,6 +139,9 @@ export async function runTurn(options: AgentTurnOptions): Promise<AgentTurnResul
 
     const executedTools: string[] = [];
     const toolResults: string[] = [];
+    // Deterministic spoken forms of executed tool outputs (T1). A read-only tool
+    // supplies one so the turn can answer aloud without a second model call.
+    const spokenResults: string[] = [];
     const intents: Array<{ tool: string; intent: Intent }> = [];
     let clarification: string | undefined;
 
@@ -160,6 +177,8 @@ export async function runTurn(options: AgentTurnOptions): Promise<AgentTurnResul
       const output = await tool.run(call.input as never, context);
       executedTools.push(tool.name);
       toolResults.push(`${tool.name} -> ${JSON.stringify(output)}`);
+      const spoken = tool.toSpeech?.(output);
+      if (spoken) spokenResults.push(spoken);
     }
 
     let answer: string;
@@ -172,6 +191,10 @@ export async function runTurn(options: AgentTurnOptions): Promise<AgentTurnResul
     } else if (intents.length === 1 && intents[0]) {
       resolved = intents[0];
       answer = describeIntent(resolved.intent);
+    } else if (spokenResults.length > 0) {
+      // A tool that can answer in words owns the answer; the model's text and
+      // the raw JSON never reach TTS (T1: deterministic, no second model turn).
+      answer = spokenResults.join(" ");
     } else if (toolResults.length > 0) {
       answer = [first.text, ...toolResults]
         .filter((line): line is string => Boolean(line))

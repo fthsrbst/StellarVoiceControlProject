@@ -25,9 +25,22 @@ test("a numeric amount is coerced to the decimal-string money rule", () => {
   assert.equal(intent.recipient, "ada");
 });
 
-test("a missing or blank asset defaults to USDC", () => {
-  assert.equal(parseSendPayment({ amount: "1", recipient: "Ahmet" }, ctx).asset, "USDC");
-  assert.equal(parseSendPayment({ amount: "1", asset: "   ", recipient: "Ahmet" }, ctx).asset, "USDC");
+test("a missing or blank asset is a clarification, never guessed (T1)", () => {
+  for (const args of [
+    { amount: "1", recipient: "Ahmet" },
+    { amount: "1", asset: undefined, recipient: "Ahmet" },
+    { amount: "1", asset: null, recipient: "Ahmet" },
+    { amount: "1", asset: "   ", recipient: "Ahmet" },
+  ]) {
+    try {
+      parseSendPayment(args, ctx);
+      assert.fail(`a missing asset must not default (${JSON.stringify(args)})`);
+    } catch (error) {
+      assert.ok(error instanceof AgentError);
+      assert.equal(error.kind, "input");
+      assert.match(error.detail, /asset is missing/i);
+    }
+  }
 });
 
 test("colloquial money words canonicalise to the supported stablecoin (step A13)", () => {
@@ -42,6 +55,20 @@ test("colloquial money words canonicalise to the supported stablecoin (step A13)
 
 test("a supported code is canonicalised regardless of case", () => {
   assert.equal(parseSendPayment({ amount: "1", asset: "xlm", recipient: "bilal" }, ctx).asset, "XLM");
+});
+
+test("an XLM payment to an alias produces the expected Intent (W1)", () => {
+  const intent = parseSendPayment(
+    { amount: "10", asset: "XLM", recipient: "acc2" },
+    { network: "testnet", transcript: "acc2'ye 10 XLM gönder" },
+  );
+  assert.deepEqual(intent, {
+    kind: "send",
+    asset: "XLM",
+    amount: "10",
+    recipient: "acc2",
+    source: "acc2'ye 10 XLM gönder",
+  });
 });
 
 test("a genuinely unsupported asset is rejected as bad input (step A13)", () => {

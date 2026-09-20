@@ -63,6 +63,24 @@
 > the Rust terminal. WAV retention (delete-on-success, cap 10, keep failures) lands here.
 > Build/test/clippy/typecheck all green; real-provider latency and the 5-command
 > acceptance run are **unverified** (no API key in this environment). See the A1 report.
+>
+> 2026-09-20 — **W1 network wiring** (`feat/w1-network-wiring`): the Rust `stellar_config`
+> command (allow-listed, validated) now feeds the webview; `app/src/lib/chain.ts` lazily
+> configures Owner B's `sendPayment` with the owner address + env aliases merged over
+> `aliases.json`; and the A9 execution seam is reordered to **build the unsigned XDR first**,
+> then ask the approver with the decoded `summary` + `payloadHash`. A live read-only script
+> (`npm run e2e:build-xdr`) printed a real testnet unsigned XLM XDR for acc1→acc2. Signing and
+> submission remain a later milestone. See `backlog/w1-network-wiring.md`.
+>
+> 2026-09-20 — **W1-fix review corrections**: the seam's `payloadHash` is now documented
+> and named as the XDR digest (`xdrDigest`), distinct from the Stellar transaction hash
+> (both pinned for one fixture, so a swap fails); a malformed tool result fails closed;
+> `executeIntent` no longer throws on an undefined tool set or a non-object decision; the
+> owner/alias `G...` addresses are CRC16-XModem checksum-validated in Rust; SHA-256
+> multi-block/UTF-8 vectors added. All suites/clippy green. See the Review fixes section in
+> `backlog/w1-network-wiring.md`.
+
+> 2026-09-20 — **T1 settings / env / Makefile** (`feat/t1-settings-env`): read-only Settings panel (`voice_health` + `stellar_config` rows with status badges, redacted Copy diagnostics) + `settings` Debug check; `.env` falls back to `~/Library/Application Support/Polaris/.env`; `make build` uses the local Tauri CLI and `make run` launches the bundle from the repo root; all checks/tests/build/clippy green — `backlog/t1-settings-env.md`.
 
 #### A0 — Push-to-talk + notch overlay harness ✅
 > Design pivot (2026-09-19): the dashboard/log-pane harness was replaced by the notch
@@ -79,6 +97,9 @@
 - [x] Model choice (decided, recorded in notes.md): **cloud-first** — Groq `whisper-large-v3-turbo` behind a one-method `Transcriber` trait, so a local `whisper.cpp` backend can be added without touching call sites (2026-09-19, branch `feat/a1-stt`).
 - [x] Wire: captured audio → STT → `transcript { text, final }` on the event stream + Rust terminal; overlay shows "Thinking" only and never the transcript (2026-09-19).
 - [x] Retention (A0 review MAJOR-3): delete a recording after a successful transcription, keep failed ones, cap the recordings dir at 10 (2026-09-19).
+- [x] F3 reliability: bilingual Groq `prompt`, one-shot allowed-language retry, short-audio hallucination filter, `GroqTransport` seam + `npm run stt:probe` (2026-09-20, `fix/f3-stt-vocab`); real-mic run still needs a human (see `backlog/f3-stt-vocab.md`).
+- [x] F3-fix: language-aware prompt (EN/TR only when forced), prompt-echo + forced-language-mismatch filters, 700 ms pre-API minimum, agent unintelligible rule; probe shows no echo (2026-09-20, `fix/f3-stt-vocab`); real-mic run still needs a human.
+- [x] F3-agent: unintelligible/empty-input rule ported into the capabilities prompt (`capabilities.ts`) with a 120-char cap and few-shot, `prompt.test.ts` reconciled to the composed prompt, eval 33/33 = 100% (2026-09-20, `integration/wallet`).
 - [ ] **Accept:** speak 5 different commands, all transcribe correctly, <2s latency on release — **blocked on a `GROQ_API_KEY` and a human run** (latency unmeasured so far; see `backlog/2026-09-19-a1-stt.md`).
 
 #### A2 — LLM roundtrip (text → agent → response) 🔲
@@ -101,6 +122,33 @@
 - [ ] Approval card + Touch ID gate → signed → testnet tx (M2 slice complete).
 - **Accept:** "send 10 USDC to <alias>" end-to-end, Touch ID approved, tx visible on explorer.
 
+#### W0 — Interactive panel windows (UI infrastructure) ✅
+> Gives the click-through notch a real interaction surface and the frontend owner a
+> pattern to add panels without touching Rust. Report: `backlog/w0-panel-windows.md`.
+- [x] Rust panel registry (`app/src-tauri/src/panels.rs`): allow-list (`wallet`/`approval`/`settings`), `open_panel` command + `open` helper, typed `unknownPanel` rejection, one instance per label, close hides (not quits) (2026-09-20, branch `feat/w0-panel-windows`).
+- [x] Menu-bar tray (Wallet… / Settings… / Quit Polaris) using the bundled app icon; accessory activation policy unchanged (2026-09-20).
+- [x] `panel-*` capability (`capabilities/panels.json`); hash routing (`panelRoutes.ts`) + `PanelShell` + Wallet/Approval/Settings skeletons + `lib/panels.ts` wired to the existing event stream (2026-09-20).
+- [x] Tests: `parsePanelRoute` (app) + panel registry (Rust, no window); docs `docs/ui-panels.md` (2026-09-20).
+- [x] Independent-review corrections applied: UI promise rejections caught, single `PanelName` source, failed-`hide()` fallback, create-race collision focuses the existing window (+1 Rust test) (2026-09-20, report §8).
+- [x] W0c: five more panel skeletons registered (`security`/`schedules`/`suggestions`/`anchor`/`p2p`) + tray reworked to one item per panel (2026-09-20, branch `feat/w0c-more-panels`, `backlog/w0c-more-panels.md`).
+- **Accept:** `npm run check` / `npm test -w @polaris/app` / `npm run build -w @polaris/app` / `cargo test` / `cargo clippy -D warnings` green. Tray icon, focusable windows and close-keeps-app-alive are **unverified** — need a human on a real Mac (`backlog/w0-panel-windows.md`).
+#### W0d — Shared panel transaction pipeline 🔲
+- [x] `app/src/lib/txPipeline.ts` (`runTx`/`runTxSequence`, injectable approver/signer/clock, never throws) + `useTxRun.ts` hook + `docs/ui-panels.md` §10 (2026-09-20, `feat/w0d-tx-pipeline`).
+- [ ] **Accept:** `npm run check` / `npm test -w @polaris/app` (173 pass) / `npm run build -w @polaris/app` green; real Touch ID + Freighter round trip from a panel is **unverified** (needs a human). Trace: `backlog/w0d-tx-pipeline.md`
+#### F1 — Notch lifetime 🔲
+- [x] (2026-09-20, branch `fix/f1-notch-lifetime`, pending PR) **F1.** The notch stays expanded through the whole turn: payment stages (`awaiting_approval`/`signing`/`submitting`) reached via additive `onStage`, collapse only from `done`/`error`, pending payment owns the notch (a hotkey press is refused with a soft en/tr label), per-stage + 6 min total watchdogs; `npm run check` / `npm test -w @polaris/app` (185 pass) / `npm run build -w @polaris/app` green — see `backlog/f1-notch-lifetime.md`
+- [ ] **Accept:** the live Touch ID card + Freighter round trip visibly holds the stage labels and a second hotkey press during the wait is ignored — **unverified** (needs a human on a real Mac). Trace: `backlog/f1-notch-lifetime.md`
+- [x] (2026-09-20, branch `feat/w6c-wallet-suggestions`) **W6c.** Wallet panel (owner/network/balances/alias book/last-10 payments + clear states + Refresh) and Suggestions panel (offline `suggest()` over owner Horizon history; Accept→opens panel + copies draft, Dismiss→`localStorage`); `wallet`/`suggestions` Debug checks; app check/tests (202 pass)/build green — `backlog/w6c-wallet-suggestions.md`
+#### NW — Notch pages → real data 🔲
+- [x] (2026-09-20, branch `feat/nw4-history-page`) **NW4.** History page reads `useHistoryData`: local 50-turn log + owner Horizon payments merged via pure mappers, demo-only fallback, error/Retry, Refresh + Clear local history, `history` Debug check; app check/tests (308 pass)/build green — `backlog/nw-history.md` (real-notch render still needs a human)
+#### W8 — P2P escrow ramp (client + voice + panel) 🔲
+- [x] `@polaris/stellar` `p2p` client (unsigned create/accept/confirm/cancel/reclaim + simulated reads, contract id a parameter), `p2p_offer`/`p2p_accept`/`p2p_confirm` voice intents + agent tools, P2P panel through `txPipeline`, Debug `p2p` check + `POLARIS_P2P_CONTRACT_ID` in `stellar_config` (2026-09-20, `feat/w8b-p2p-client`, `backlog/w8b-p2p-client.md`).
+- [ ] **Accept:** `npm run check` / all workspace tests / `npm run build` green; live testnet read (`npm run p2p:live`) decodes offer `1` (`Settled`); the real Mac panel/approval flow is **unverified**. Review fixes applied (union `OfferState` decode, confirm+reclaim after deadline, paging, accept-card terms).
+#### W3 — Touch ID approval gate (Rust) 🔲
+- [x] `biometric.rs` (`LAContext` device-owner auth, reason sanitising), `approval.rs` (one-request state machine, hash binding, webview commands, in-process `take_authorized`), `health.rs` (Debug health + self-test) — 2026-09-20, `feat/w3-touchid-gate`
+- [x] Independent-review fixes: `WalletOnly` unreachable from the webview (in-process `begin_wallet_only` only), `{kind,message}` error contract + snapshot returns (W2), panic-safe `in_flight` guard — 2026-09-20
+- [ ] **Accept:** the real Touch ID prompt, the device-password fallback and cancel verified by a human on a real Mac (**not verified** — needs a human). Trace: `backlog/w3-touch-id-gate.md`
+
 ## Milestone 2b — Minimal Integration Slice (chain lane first) 🔲
 > Source: `backlog/2026-09-19-slice-gap-analysis.md` §G.3 (S1–S10), adapted to decisions D1/D2.
 > Integration between the UI lane and the chain lane is **paused until both sides are done**.
@@ -117,7 +165,7 @@
 - [x] (2026-09-20, chain-lane PR) **C1.** Real `sendPayment` ChainTool: `Intent` → unsigned XDR + decoded summary; alias resolution via committed `aliases.json` first (D1 step 1)
 - [x] (2026-09-20, chain-lane PR) **C2.** `polaris_guard` owner-side TypeScript client: `set_rule`, `set_alias`, SAC `approve`, `pay_executor`, plus `direct` / `guarded` modes of `sendPayment` (D1 step 2)
 - [x] (2026-09-20, chain-lane PR) **C3.** Headless end-to-end script: `Intent` → XDR → dev-key sign → `submitSignedTx` → testnet tx; over-limit rejected with guard error **#105** (`NeedsOwnerApproval`) (D1 step 3)
-- [ ] **C4.** Registration/adapter so a shell can turn an `Intent` into a `ChainToolResult`; expose `@polaris/stellar` to the webview (no voice dependency)
+- [x] **C4.** Registration/adapter so a shell can turn an `Intent` into a `ChainToolResult`; expose `@polaris/stellar` to the webview (no voice dependency) — (2026-09-20, `feat/w1-network-wiring`: `stellar_config` Rust command → `app/src/lib/chain.ts` lazily configures `sendPayment`; the A9 seam now builds the XDR before the approval gate and hands the card `summary` + `payloadHash`; live `e2e:build-xdr`) — see `backlog/w1-network-wiring.md`
 - [ ] **C5. (PROPOSED)** Signing option: Rust approval gate + TypeScript signing/submission (option 1) for the demo; full Rust-native signer post-hackathon
 - [ ] **C6. (PROPOSED)** Standardise signing on XDR: `SigningService.sign(payloadHash)` → `signTransaction(xdr)` — needs Owner A agreement
 - [x] (2026-09-20, chain-lane PR) **C7.** Guard client + keeper take the contract id as a parameter (e.g. `GUARD_CONTRACT_ID`), never hard-coded, so v0.1 and v0.2 (`polaris_guard_v2`) run side by side (D9)
@@ -132,11 +180,24 @@
 - [ ] **V5.** Submit path: sign in TS, `submitSignedTx(signedXdr, unsignedXdr)`, emit `tx_submitted`
 - [ ] **V6.** Replace text input with the merged voice path
 - [ ] **V7. (stretch)** Touch ID (LocalAuthentication) behind the approval gate
+- [x] **F2.** Real assistant system prompt: `capabilities.ts` (role/behaviour + tool-registry capability list + config account table + few-shot examples), pure `accountRefs.ts` normalisation before the model and at validation, `app/src/lib/agent.ts` config wiring, live `npm run e2e:prompt` eval (31/31 = 100%) — `backlog/f2-assistant-prompt.md`
+- [x] (2026-09-20, branch `feat/t1-asset-defaults`) **T1-defaults.** `send_payment` asks instead of defaulting a missing asset, read-only `get_balance` with a deterministic spoken sentence (`toSpeech` in the loop, Horizon reader injected from `stellar_config`), PGUSD added to the chain asset registry — `backlog/t1-asset-defaults.md`
+- [x] (2026-09-20, branch `feat/nw1-wallet-page`) **NW1.** Notch Wallet page on real data: `notch/data/useWalletData.ts` (stellar_config + Horizon balances/payments + alias book + session `tx_submitted` latest tx), mock import removed from `WalletPage.tsx`; check/tests (301 pass)/build green — `backlog/nw-wallet.md`
+
+### Signing bridge
+- [x] (2026-09-20, branch `feat/w4a-freighter-bridge-page`, pending PR) **W4a.** Freighter signing bridge page (Stellar Wallets Kit): second Vite `/sign` entry, pure state machine, fail-closed address/network checks, signed-vs-unsigned hash binding, local fixture + tests, protocol docs (review fixes 2 applied; live Freighter still needs a human)
+- [ ] (2026-09-20, branch `feat/w4b-wiring`, pending PR + W4b-1) **W4b-2.** TS wiring: Touch ID approver (`approval_begin`→open card→authorized/denied/expired/timeout, fail-closed), `bridge_sign`→`submitSignedTx`→`tx_submitted` with hash-equality check, enriched outcome + tr/en spoken result, Rust `tx_submitted_emit` command + validation, W4 Debug checks (`network`/`approval`/`bridge`/`submit`) — see `backlog/w4b-wiring.md`
+- [x] (2026-09-20, branch `fix/w4b2-review`) **W4b-2 fix.** Applied the W4b-2 review: never-drop-submitted outcome (`shouldSurfaceOutcome`) + 90 s-approval tests, lazy `@polaris/stellar` imports (`signing`/`submit`/`network`), `isBridgeSigned` payload validation, `tx_submitted_emit` doc + Wallet label, approver deadline arming; MAJOR-2 eager-bundle goal blocked by out-of-scope W5/W6 modules — see `backlog/w4b2-fix.md`
+- [x] (2026-09-20, branch `feat/w4b-bridge-server`) **W4b-1 (Rust).** Localhost signing-session server (`tiny_http`, one-time token, TTL, constant-time compare), `bridge_sign`/`bridge_selftest`/`bridge_health` commands, parse-free XDR verification + StrKey decode, browser launch, debug contract FeatureCheck; 44 bridge unit tests. Real browser + Freighter round trip still needs a human
+- [x] (2026-09-20, branch `fix/f4-visible-errors`, pending PR) **F4.** Webview failures reach the Rust terminal via the new `polaris_log` command (redacted/truncated, optional `error` event for the Debug tail), `onerror`/`unhandledrejection` hooks, specific refusal labels, and chain/approver/signing failure logging; redactor + label-mapping tests. See `backlog/f4-visible-errors.md`
 
 ## Milestone 3 — Chain & Guard 🔲
 - [x] polaris_guard Soroban contract: per-tx/daily spending limit + alias book; deployed on testnet, contract ID documented (2026-09-19, PR #10 + keeper PR #9)
 - [ ] Anchor flow: SEP-10/38/6 TRY mock deposit → USDC balance, driven by voice
   - SEP-6 client merged ([PR #11](https://github.com/n0tnow/StellarVoiceControlProject/pull/11)); voice wiring pending (Owner A, not on the chain-lane critical path)
+  - [x] (2026-09-20, branch `feat/w5b-anchor-flows`) **W5b.** App-side anchor `Signer` (seq-0 wallet-only `bridge_sign_challenge`, else Touch ID pipeline) + `createAnchorSession`, voice `deposit`/`withdraw` intents, Anchor panel + Debug check; live Touch ID/Freighter needs a human — `backlog/w5b-anchor-flows.md`
+  - [ ] (2026-09-20, branch `feat/w5a-anchor-signing`) **W5a (Rust).** Wallet-only SEP-10 challenge signing: `bridge_sign_challenge` + `anchor_signing_health`, seq-0/owner-source integrity checks (op types not parsed), parser hardened against crafted XDR (no panic), generalised signature-list parsing; live anchor challenge still needs a human — see `backlog/w5a-anchor-signing.md`
+  - [x] (2026-09-20, branch `feat/w5b-anchor-flows`) **W5b-fix.** Review corrections: the real pipeline captures the signed XDR (fake-bridge tests), voice `deposit`/`withdraw` drive `runAnchorIntent` on the panel `AnchorSession`, stricter missing-command check, directional step mapping, configured passphrase — `backlog/w5b-anchor-flows.md`
 - [ ] Protocol integration: Soroswap swap OR DeFindex vault (pick ONE via testnet spike, do not attempt both)
 - [ ] Approval card UI polished (Stellar Design System / shadcn), explorer links on card
 - [ ] (optional if time) MPP pay-per-command session
@@ -150,6 +211,7 @@
 - [ ] CT integration (`stellar/src/confidential/`, PLANNED) — conditional on GO
 - [ ] SPP spike (2h cap) → GO / NO-GO (`backlog/confidential-spike-spp.md`)
 - [ ] SPP integration (`stellar/src/spp/`, PLANNED) — conditional on GO
+- [x] (2026-09-20, branch `feat/w9-spp`) **W9.** In-app SPP read-only: `privacy` panel + `lib/spp.ts` (status/contracts/verified evidence) + Debug check; value-moving forms blocked on a bridge `signAuthEntry` extension — `backlog/w9-spp.md`
 - [ ] `polaris_guard_v2` crate (new contract, own deployment; NOT an edit of `polaris_guard`) — D9
 - [ ] `polaris_privacy_gate` crate (conditional on the spike showing on-chain deposit/withdraw gating is possible) — D9
 - [ ] Approval-card privacy variant + batch payroll card
@@ -165,14 +227,26 @@
 - [x] (2026-09-20, chain-lane PR) **T3.** Suggestions engine: pure `suggest()` + fixtures + tests — `stellar/src/suggest/` (PLANNED), offline
 - [ ] **T4.** History readers: local encrypted history store + Horizon/`Paid` events reader
 - [ ] **T5.** UI (Owner A): Settings "Security" profiles, "Upcoming payments" list with Cancel, suggestions panel with Accept/Dismiss, auto-pay enable card
+- [x] (2026-09-20, W6a panel) Security panel: on-chain state + profiles + enable/tighten/disable in D13 order + alias editor + W6 Debug check — `backlog/w6a-security-panel.md` (upcoming-payments/suggestions remain)
+- [x] (2026-09-20, branch `feat/w6b-schedules`) **W6b.** Scheduled payments: voice intents `schedule_payment`/`cancel_schedule` (tr/en, explicit device zone) + "Upcoming payments" panel (Cancel / New schedule / keeper strip) + `schedules` Debug check — see `backlog/w6b-schedules.md`
+- [x] (2026-09-20, branch `feat/nw3-tasks-page`) **NW3.** Notch Tasks page → real schedules: `notch/data/useTasksData.ts` (view-model mappers + thin hook; mock only outside Tauri/no owner) + `TasksPage.tsx` (local+UTC next run, amount/alias, recurrence, runs left, keeper hint, Cancel via `txPipeline`, Retry/empty states); 6 mapper tests, app 299/build green — `backlog/nw3-tasks-page.md`
+
+- [ ] **T6.** Demo runbook completed after T1/T2/T5 (`docs/demo-runbook.md`)
+- [x] (2026-09-20, `integration/wallet`) **Merge-fix.** Repaired the naive five-branch merge (interfaces/agent/app/Rust); all checks, tests, build and clippy green — `backlog/merge-fix-integration.md`
+- [x] (2026-09-20, `integration/wallet`) **MERGE-FIX2.** Fixed the W5a-broken Rust test build (`challenge` field in two test initializers) and re-scanned the last three merges for keep-both damage (none found); cargo test/clippy, `npm run check`, app/agent tests green — `backlog/merge-fix-integration.md`
+- [x] (2026-09-20, `integration/wallet`) **MERGE-FIX3.** Merged the reviewed `feat/w5a-anchor-signing` and `feat/w5b-anchor-flows` fix branches into integration, resolving the `verify.rs` (panic-free parser + `SourceMismatch`) and `chain.ts` (W6b schedules + W5b `runAnchorIntent`) conflicts; all checks/tests/build/cargo test/clippy green — `backlog/merge-fix-integration.md`
+- [x] (2026-09-20, `integration/wallet`) **MERGE-MAIN.** Merged Fatih's notch shell (origin/main #23/#24) into the pipeline branch: one App bridge over our turn session + his shell machine, typed prompt through `executeApprovedIntent`, debug check ported to `getShellGeometry`, `window_size` BUG-1 fix; all checks/tests/build/clippy green — `backlog/merge-main-notch-shell.md`
+- [x] (2026-09-20, W6a-fix) Review fixes: per-step resequencing in `runTxSequence` (B1), mode-driven plan (M2), alias union + read-failed (M3), honest wording + double-click guard (N4–N8) — `backlog/w6a-security-panel.md`
+- [x] (2026-09-20, branch `feat/nw2-rules-page`) **NW2.** Notch Rules page reads the real guard rules (read-only summary via `useRulesData` + pure `mapRulesView`), "Edit rules" opens the Security panel; app check/tests (299/0)/build green — `backlog/nw-rules.md`
 - [ ] **T6.** Demo runbook completed after T1/T2/T5 (`docs/demo-runbook.md`)
 
 ## Milestone 4 — Delivery / Presentation 🔲
 > Deadline: 20 Sep 12:00. Bonuses (passkey wallet, P2P escrow, developer mode) ONLY after M4 items are done.
-- [ ] README refreshed to reflect current codebase (constitution requirement)
-- [ ] Demo video recorded + pitch deck
+- [x] README refreshed to reflect current codebase (constitution requirement)
+- [ ] Demo video recorded + pitch deck; demo script + pitch text written (`docs/demo-script.md`, `docs/pitch.md`, T1-demo)
 - [ ] Docs synced: notes.md, backlog reports, docs/reports/INDEX.md, sprints.md all up to date
 - [ ] (bonus, if everything above is done) passkey wallet / P2P escrow / developer mode
+- [ ] (2026-09-20, W8a) P2P escrow contract `polaris_p2p_escrow`: built, 20 tests, testnet-deployed `CBMXLTX…` — TS client + order-book UI pending review
 
 ---
 

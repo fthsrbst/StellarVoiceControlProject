@@ -15,7 +15,24 @@
  * 1. Intent — structured value-moving request
  * ------------------------------------------------------------------ */
 
-export type IntentKind = "deposit" | "swap" | "send" | "guard_policy" | "raw_tx";
+export type IntentKind =
+  | "deposit"
+  | "withdraw"
+  | "swap"
+  | "send"
+  | "guard_policy"
+  | "raw_tx"
+  | "schedule_payment"
+  | "cancel_schedule"
+  // P2P escrow (W8): lock tokens and ask TRY off-chain, take an offer, confirm
+  // the off-chain TRY payment. Value-moving, so every one is approval-gated.
+  | "p2p_offer"
+  | "p2p_accept"
+  | "p2p_confirm"
+  // Panel-only escrow actions (no voice tool yet): cancel an open offer and
+  // reclaim after the pay deadline. They still go through the approval gate.
+  | "p2p_cancel"
+  | "p2p_reclaim";
 
 export interface Intent {
   kind: IntentKind;
@@ -30,6 +47,28 @@ export interface Intent {
   memo?: string;
   /** Voice transcript excerpt that produced it. */
   source?: string;
+  /**
+   * `schedule_payment` only. The wall-clock first run plus its **explicit**
+   * IANA zone — never the machine zone implicitly. The chain tool resolves these
+   * to UTC epoch seconds (`resolveLocalTime`) and shows local + UTC on the card.
+   */
+  firstRun?: { localDate: string; localTime: string; timeZone: string };
+  /** `schedule_payment` only. Fixed-second repeat; absent means one-shot. */
+  repeat?: { every: "day" | "week" | "custom"; customSeconds?: number };
+  /** `schedule_payment` only. Number of executions; required with `repeat`. */
+  runs?: number;
+  /** `cancel_schedule` only. An exact schedule id when the user named one. */
+  scheduleId?: number;
+  /** `cancel_schedule` only. How to pick among several schedules for one recipient. */
+  which?: "last" | "next";
+  /**
+   * P2P offer only: the asking price in TRY as a decimal string (e.g. "3400").
+   * The off-chain TRY leg is never moved by Polaris; this is only the price the
+   * seller asks for and the rate the offer shows.
+   */
+  priceTry?: string;
+  /** P2P accept/confirm only: the on-chain offer id spoken by the user. */
+  offerId?: number;
 }
 
 /* ------------------------------------------------------------------ *
@@ -62,11 +101,24 @@ export type ChainTool = (intent: Intent) => Promise<ChainToolResult>;
  * ------------------------------------------------------------------ */
 
 /**
+ * ``payloadHash`` on this seam is the **XDR digest**: lowercase-hex SHA-256 of
+ * the UTF-8 bytes of the base64 unsigned-XDR string (the same definition the
+ * agent seam and the `approval_request` / `approval_result` events use, and the
+ * one the Rust approval gate will recompute without XDR parsing).
+ *
+ * It is **not** the Stellar transaction hash. `Transaction.hash()`
+ * (`payloadHashOf` in `@polaris/stellar`, `stellar/src/payments/summary.ts`) is
+ * a different value that identifies the transaction on-chain and appears only in
+ * the chain summary's explorer URL. The transaction hash must never be passed
+ * where the digest is expected, and vice versa.
+ */
+
+/**
  * Rust-side service exposed to the webview via a Tauri command.
  * Owner A owns the Touch ID approval flow; Owner B consumes signed envelopes.
  */
 export interface SigningService {
-  /** Rejects unless Touch ID approval succeeded for this `payloadHash`. */
+  /** Rejects unless Touch ID approval succeeded for this XDR digest (`payloadHash`). */
   sign(payloadHash: string): Promise<{ signedXdr: string }>;
 }
 
@@ -228,9 +280,15 @@ export type PolarisEvent =
       type: "approval_request";
       intent: Intent;
       summary: ChainToolResult["summary"];
+      /** The XDR digest (SHA-256 of the base64 unsigned-XDR string), never the tx hash. */
       payloadHash: string;
     }
-  | { type: "approval_result"; payloadHash: string; approved: boolean }
+  | {
+      type: "approval_result";
+      /** The XDR digest the decision is bound to (see `approval_request`). */
+      payloadHash: string;
+      approved: boolean;
+    }
   | { type: "tx_submitted"; hash: string; explorerUrl: string }
   | { type: "error"; message: string };
 
@@ -258,4 +316,130 @@ export interface AppInfo {
   /** e.g. "testnet" */
   network: string;
   tauriVersion: string;
+}
+
+/* ------------------------------------------------------------------ *
+ * 7. Chain configuration (Tauri `stellar_config` command)
+ * ------------------------------------------------------------------ */
+
+/**
+ * The non-secret chain configuration the shell reads once from Rust and hands to
+ * the chain tool (`app/src/lib/chain.ts`). Rust mirrors this type byte-for-byte
+ * in `app/src-tauri/src/stellar_config.rs`; it is an allow-list — no secret
+ * (provider key, keeper secret) is ever part of it.
+ *
+ * `ownerAddress` is the sender (a public `G...` address); `null` means the shell
+ * must refuse with "Set POLARIS_OWNER_ADDRESS" rather than guess. `aliases` is
+ * the env-supplied book (`POLARIS_ALIASES`), merged over the committed
+ * `aliases.json` on the TypeScript side.
+ */
+export interface StellarConfig {
+  network: string;
+  rpcUrl: string;
+  horizonUrl: string;
+  networkPassphrase: string;
+  ownerAddress: string | null;
+  aliases: Record<string, string>;
+  guardContractId: string | null;
+  /** `POLARIS_P2P_CONTRACT_ID`; the deployed `polaris_p2p_escrow` id, or null. */
+  p2pContractId: string | null;
+}
+
+/* ------------------------------------------------------------------ *
+ * 8. Approval gate (step W3)
+ *
+ * Section 7 is reserved for the chain-configuration types (W1), which append
+ * after `AppInfo` too; this section is numbered 8 so the two branches do not
+ * collide on merge.
+ * ------------------------------------------------------------------ */
+
+/** How an approval is expected to be granted. */
+export type ApprovalMode = "touch_id" | "wallet_only";
+
+/** The lifecycle of one approval request; `consumed` is terminal and one-way. */
+export type ApprovalState = "pending" | "authorized" | "denied" | "expired" | "consumed";
+
+/**
+ * The input to `approval_begin`. `payloadHash` must be the lowercase hex SHA-256
+ * of the UTF-8 bytes of `unsignedXdr`; the gate rejects a mismatch.
+ */
+export interface ApprovalRequestInput {
+  /** Assigned by the gate; the webview may omit it. */
+  id?: string;
+  payloadHash: string;
+  /** base64 XDR, unsigned */
+  unsignedXdr: string;
+  summary: ChainToolResult["summary"];
+  intent: Intent;
+  /** Defaults to `"touch_id"`. */
+  mode?: ApprovalMode;
+  /**
+   * Reserved for the anchor flow (W5). It is **not** an authorization signal:
+   * `approval_begin` rejects `"wallet_only"` unconditionally, and only an
+   * in-process Rust API can create such a request.
+   */
+  origin?: string;
+}
+
+/**
+ * What `approval_current` returns so a panel that opened *after* the
+ * `approval_request` event can hydrate. It deliberately never carries the
+ * unsigned XDR.
+ */
+export interface ApprovalSnapshot {
+  id: string;
+  payloadHash: string;
+  summary: ChainToolResult["summary"];
+  intent: Intent;
+  mode: ApprovalMode;
+  state: ApprovalState;
+  expiresAtMs: number;
+}
+
+/** What `approval_status` returns, including why a request was denied. */
+export interface ApprovalStatus {
+  id: string;
+  state: ApprovalState;
+  reason?: string;
+}
+
+/**
+ * The failure categories every approval command rejects with. The approval card
+ * branches on `kind`; `message` is human-readable detail. The Rust mirror is
+ * `ApprovalErrorKind` in `app/src-tauri/src/approval.rs`.
+ */
+export type ApprovalErrorKind =
+  | "cancelled"
+  | "failed"
+  | "unavailable"
+  | "timeout"
+  | "expired"
+  | "notPending";
+
+/**
+ * The typed rejection shape of the approval commands. `approval_authorize` and
+ * `approval_deny` otherwise resolve to the updated `ApprovalSnapshot`; the
+ * command contract is declared in `docs/interfaces.md` §8.
+ */
+export interface ApprovalCommandError {
+  kind: ApprovalErrorKind;
+  message: string;
+}
+
+/* ------------------------------------------------------------------ *
+ * 9. Feature health (Debug panel contract)
+ * ------------------------------------------------------------------ */
+
+export type HealthStatus = "ok" | "warn" | "fail" | "unknown";
+
+/** One feature's health, rendered directly by the in-app Debug panel. */
+export interface FeatureHealth {
+  id: string;
+  title: string;
+  milestone: string;
+  status: HealthStatus;
+  /** One actionable sentence; never contains secrets. */
+  detail: string;
+  /** Milliseconds since the Unix epoch. */
+  checkedAt: number;
 }

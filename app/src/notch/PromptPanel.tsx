@@ -9,7 +9,10 @@ import {
 import { describeIntent, type SpokenResult } from "@polaris/agent";
 
 import { runAgentTurn, type AgentRun } from "@/lib/agent";
+import { executeApprovedIntent } from "@/lib/chain";
 import { speakTurnResult } from "@/lib/speech";
+import type { SubmittedOutcome } from "@/lib/signing";
+import { stageLabel, type PaymentStage } from "@/lib/turnSession";
 import type { VoiceStage } from "./shellState";
 
 /**
@@ -30,7 +33,9 @@ import type { VoiceStage } from "./shellState";
  *
  * The answer goes through the same agent pipeline as the voice path
  * (`runAgentTurn`, the same `@/lib/agent` the overlay uses) and, when the
- * speaker switch is on, the same TTS path (`speakTurnResult`).
+ * speaker switch is on, the same TTS path (`speakTurnResult`). A produced
+ * intent is not a shortcut either: it runs `executeApprovedIntent`, so the typed
+ * path shares the voice path's approval → sign → submit gate.
  */
 
 /** localStorage key for the speaker switch. `"off"` is the only opt-out value. */
@@ -80,6 +85,11 @@ export function PromptPanel({ onContentHeight, onDismiss, voiceStage }: PromptPa
   const [text, setText] = useState("");
   const [thinking, setThinking] = useState(false);
   const [result, setResult] = useState<AgentRun | null>(null);
+  // The value-moving half of a typed turn: an intent produced here goes down the
+  // same approve → sign → submit seam as a spoken one (never a shortcut that
+  // skips the gate). `stage` carries the approver/signer's real boundaries.
+  const [paymentStage, setPaymentStage] = useState<PaymentStage | null>(null);
+  const [execution, setExecution] = useState<SubmittedOutcome | null>(null);
   const [speakerOn, setSpeakerOn] = useState(loadSpeakerPreference);
 
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -120,6 +130,7 @@ export function PromptPanel({ onContentHeight, onDismiss, voiceStage }: PromptPa
     busyRef.current = true;
     setThinking(true);
     setResult(null);
+    setExecution(null);
     try {
       const run = await runAgentTurn(prompt);
       setResult(run);
@@ -131,6 +142,19 @@ export function PromptPanel({ onContentHeight, onDismiss, voiceStage }: PromptPa
           ? { answer: run.outcome.answer, intent: run.outcome.intent }
           : { answer: run.outcome.answer };
         speakTurnResult(spoken);
+      }
+      // A produced intent is not merely described: it runs the shared execution
+      // seam, so the Touch ID approval gate and the Freighter bridge are always
+      // in the path. The outcome is shown inline instead of spoken.
+      if (run.ok && run.outcome.intent) {
+        try {
+          const outcome = await executeApprovedIntent(run.outcome.intent, {
+            onStage: setPaymentStage,
+          });
+          setExecution(outcome);
+        } finally {
+          setPaymentStage(null);
+        }
       }
     } finally {
       setThinking(false);
@@ -239,6 +263,10 @@ export function PromptPanel({ onContentHeight, onDismiss, voiceStage }: PromptPa
         {thinking || result ? (
           <div className="prompt-answer" role="status" aria-live="polite">
             {thinking ? <p className="prompt-thinking">Thinking…</p> : renderResult(result)}
+            {paymentStage !== null ? (
+              <p className="prompt-intent">{stageLabel(paymentStage, null)}…</p>
+            ) : null}
+            {execution !== null ? renderExecution(execution) : null}
           </div>
         ) : null}
       </div>
@@ -265,5 +293,22 @@ function renderResult(run: AgentRun | null) {
       ) : null}
       <p className="prompt-text">{run.outcome.answer}</p>
     </>
+  );
+}
+
+/** The typed turn's execution result: the submitted hash, or a short failure. */
+function renderExecution(outcome: SubmittedOutcome) {
+  if (outcome.status === "executed" && outcome.txHash) {
+    return (
+      <p className="prompt-intent" title={outcome.txHash}>
+        Submitted · {outcome.txHash}
+      </p>
+    );
+  }
+  const message = `${outcome.label ?? "Chain error"}: ${outcome.detail ?? ""}`;
+  return (
+    <p className="prompt-error" title={message}>
+      {message}
+    </p>
   );
 }

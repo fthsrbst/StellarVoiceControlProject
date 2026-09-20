@@ -16,7 +16,10 @@ export {
   executeIntent,
   isNotImplementedError,
   resolveApprover,
+  sha256Hex,
+  xdrDigest,
   type ApprovalDecision,
+  type ApprovalRequest,
   type ChainToolSet,
   type ExecuteIntentOptions,
   type ExecutionOutcome,
@@ -33,7 +36,20 @@ export {
   type LlmToolCall,
   type LlmTurn,
 } from "./loop.ts";
-export { POLARIS_SYSTEM_PROMPT, withDetectedLanguage } from "./prompt.ts";
+export { POLARIS_SYSTEM_PROMPT, withClock, withDetectedLanguage } from "./prompt.ts";
+export { buildSystemPrompt, type SystemPromptInput } from "./capabilities.ts";
+export {
+  AccountRefLlm,
+  buildAccountBook,
+  normalizeAccountRefs,
+  normalizeRecipient,
+  OWNER_ALIAS,
+  RECIPIENT_ALIAS,
+  shortAddress,
+  type AccountBook,
+  type AccountRef,
+  type AliasMap,
+} from "./accountRefs.ts";
 export {
   ASSET_SYNONYMS,
   DEFAULT_ASSET,
@@ -45,10 +61,12 @@ export {
 export {
   capSpokenText,
   confirmationSentence,
+  failureSentence,
   isSpeakable,
   MAX_SPOKEN_CHARS,
   SpeechQueue,
   spokenText,
+  submittedSentence,
   type SpeakFn,
   type SpokenResult,
 } from "./speech.ts";
@@ -109,3 +127,46 @@ export {
   sendPaymentTool,
   type SendPaymentInput,
 } from "./tools/payment.ts";
+export {
+  balanceSentence,
+  formatBalanceAmount,
+  getBalanceTool,
+  trimAmount,
+  type AssetBalance,
+  type BalanceReader,
+  type BalanceResult,
+  type GetBalanceInput,
+} from "./tools/balance.ts";
+export {
+  depositTool,
+  FIAT_CODE,
+  normalizeFiat,
+  parseDeposit,
+  parseWithdraw,
+  withdrawTool,
+  type DepositInput,
+  type WithdrawInput,
+} from "./tools/anchor.ts";
+export {
+  cancelScheduleTool,
+  isValidTimeZone,
+  normalizeRepeat,
+  normalizeWhich,
+  parseCancelSchedule,
+  parseSchedulePayment,
+  schedulePaymentTool,
+  type CancelScheduleInput,
+  type SchedulePaymentInput,
+} from "./tools/schedule.ts";
+export {
+  p2pAcceptTool,
+  p2pConfirmTool,
+  p2pOfferTool,
+  parseOfferId,
+  parseP2pAccept,
+  parseP2pConfirm,
+  parseP2pOffer,
+  parseTryPrice,
+  type P2pOfferIdInput,
+  type P2pOfferInput,
+} from "./tools/p2p.ts";

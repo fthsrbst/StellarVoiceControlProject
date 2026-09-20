@@ -7,25 +7,35 @@
 //! (`docs/interfaces.md`).
 
 mod agent;
+mod approval;
+mod biometric;
+mod bridge;
 mod capture;
 mod commands;
 mod ctrl_tap;
 mod env;
 mod events;
 mod gesture;
+mod health;
 mod hotkey;
 mod hotkey_flags;
 mod notch;
+mod panels;
+mod stellar_config;
 mod stt;
 mod timing;
 mod tts;
+mod tx_events;
 mod types;
+mod voice_health;
+mod weblog;
 
 use tauri::Manager;
 
 pub use commands::{AppInfo, NETWORK};
 pub use events::{AgentStage, HotkeyState, PolarisEvent, SpeechState, POLARIS_EVENT_NAME};
 pub use notch::{NotchActivationPolicy, ShellGeometry};
+pub use panels::{PanelError, PanelSpec, PANELS};
 pub use types::CaptureStatus;
 
 /// Starts the desktop shell. Called from `main.rs`.
@@ -50,7 +60,30 @@ pub fn run() {
             notch::shell_commit_state,
             notch::shell_resize_content,
             hotkey::hotkey_permission,
+            panels::open_panel,
+            stellar_config::stellar_config,
+            approval::approval_begin,
+            approval::approval_authorize,
+            approval::approval_deny,
+            approval::approval_status,
+            approval::approval_current,
+            health::biometric_health,
+            health::biometric_selftest,
+            voice_health::voice_health,
+            tx_events::tx_submitted_emit,
+            // Task F4: one webview log line in the terminal, optionally mirrored
+            // onto the `error` event the Debug panel renders.
+            weblog::polaris_log,
+            bridge::commands::bridge_sign,
+            bridge::commands::bridge_selftest,
+            bridge::commands::bridge_health,
+            bridge::commands::bridge_sign_challenge,
+            bridge::commands::anchor_signing_health,
         ])
+        // Step W0: a panel's close button hides it instead of quitting the app
+        // (the overlay's `main` window is never closed, so the close handler is
+        // only ever about panels).
+        .on_window_event(panels::handle_window_event)
         .setup(|app| {
             // Captures live under the app data dir so they never land in the repo.
             let recordings_dir = app.path().app_data_dir()?.join("recordings");
@@ -80,6 +113,18 @@ pub fn run() {
             // any missing config itself.
             app.manage(tts::build_backend());
 
+            // Step W3: the Touch ID approval gate. The store holds the one
+            // pending approval that may be released to the Freighter bridge;
+            // the authenticator is the real LocalAuthentication prompt (a fake
+            // is used only in tests).
+            app.manage(approval::ApprovalStore::new());
+            app.manage(biometric::system());
+
+            // Step W4b: the browser launcher for the Freighter signing bridge.
+            // Managed as a trait object so tests can install a fake and never
+            // open a real browser.
+            app.manage(bridge::commands::system_launcher());
+
             // Registers the Control+Option monitor and the Control+Option+Space
             // fallback; both feed the same capture latch.
             hotkey::setup(app)?;
@@ -88,6 +133,10 @@ pub fn run() {
             // and registers the double-Control detector that proposes the folded
             // `prompt` shell state.
             notch::setup(app)?;
+
+            // Step W0: the menu-bar entry point for the panel windows. Polaris is
+            // an accessory app (no Dock icon), so this is the user's only chrome.
+            setup_tray(app)?;
 
             println!(
                 "polaris: notch overlay ready — hold Control+Option (or Control+Option+Space) \
@@ -155,3 +204,74 @@ fn apply_activation_policy(app: &mut tauri::App) {
 /// on every platform.
 #[cfg(not(target_os = "macos"))]
 fn apply_activation_policy(_app: &mut tauri::App) {}
+
+/// Tray menu item ids that open a panel, in menu order. Each id is exactly the
+/// panel's registry name, so the tray and the `open_panel` command cannot drift.
+const TRAY_MENU_PANELS: &[&str] = &[
+    panels::WALLET,
+    panels::SECURITY,
+    panels::SCHEDULES,
+    panels::SUGGESTIONS,
+    panels::ANCHOR,
+    panels::P2P,
+    panels::PRIVACY,
+    panels::SETTINGS,
+    panels::DEBUG,
+];
+
+/// Tray menu item id for quitting. `MenuEvent::id()` comes back as exact strings.
+const TRAY_MENU_QUIT: &str = "quit";
+
+/// Step W0: builds the menu-bar status item.
+///
+/// One item per panel opens its window through the same registry the
+/// `open_panel` command uses; "Quit Polaris" exits. The approval panel is
+/// deliberately absent: it is opened by the approval flow, never by hand.
+///
+/// The icon is the bundled app icon (`tauri-build` embeds it), so the tray needs
+/// no second asset. It is not marked as a template image because the app icon is
+/// a coloured glyph, not a monochrome template.
+fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::menu::MenuBuilder;
+    use tauri::tray::TrayIconBuilder;
+
+    let menu = MenuBuilder::new(app)
+        .text(panels::WALLET, "Wallet…")
+        .text(panels::SECURITY, "Security & rules…")
+        .text(panels::SCHEDULES, "Schedules…")
+        .text(panels::SUGGESTIONS, "Suggestions…")
+        .text(panels::ANCHOR, "Anchor…")
+        .text(panels::P2P, "P2P…")
+        .text(panels::PRIVACY, "Privacy…")
+        .text(panels::SETTINGS, "Settings…")
+        .text(panels::DEBUG, "Debug…")
+        .separator()
+        .text(TRAY_MENU_QUIT, "Quit Polaris")
+        .build()?;
+
+    let mut builder = TrayIconBuilder::new()
+        .menu(&menu)
+        .tooltip("Polaris")
+        .on_menu_event(handle_tray_menu);
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon);
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
+/// Routes a tray menu selection. Panel ids are the registry names themselves, so
+/// a click is just `panels::open`; anything else is ignored.
+fn handle_tray_menu(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
+    let id = event.id().as_ref();
+    if id == TRAY_MENU_QUIT {
+        app.exit(0);
+        return;
+    }
+    if !TRAY_MENU_PANELS.contains(&id) {
+        return;
+    }
+    if let Err(error) = panels::open(app, id) {
+        eprintln!("polaris: {error}");
+    }
+}

@@ -20,7 +20,12 @@
     "dev": "npm run tauri:dev -w @polaris/app",
     "start:app": "npm run tauri:dev -w @polaris/app",
     "agent": "npm run start -w @polaris/agent",
-    "e2e:intent": "node --env-file-if-exists=.env scripts/e2e-intent.mjs"
+    "stt:probe": "node --env-file-if-exists=/Users/bilalkaya/StellarVoiceControlProject/.env scripts/stt-probe.mjs",
+    "e2e:intent": "node --env-file-if-exists=.env scripts/e2e-intent.mjs",
+    "e2e:prompt": "node --env-file-if-exists=.env scripts/e2e-prompt-eval.mjs",
+    "e2e:build-xdr": "node --env-file-if-exists=.env scripts/e2e-build-xdr.mjs",
+    "p2p:live": "node --env-file-if-exists=.env scripts/p2p-live-read.mjs",
+    "bridge:fixture": "node --env-file-if-exists=.env scripts/bridge-fixture.mjs"
   },
   "devDependencies": {
     "typescript": "7.0.2"

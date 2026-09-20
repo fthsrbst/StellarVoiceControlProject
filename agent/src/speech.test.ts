@@ -3,7 +3,16 @@ import { test } from "node:test";
 
 import type { Intent } from "@polaris/interfaces";
 
-import { capSpokenText, confirmationSentence, isSpeakable, MAX_SPOKEN_CHARS, SpeechQueue, spokenText } from "./speech.ts";
+import {
+  capSpokenText,
+  confirmationSentence,
+  failureSentence,
+  isSpeakable,
+  MAX_SPOKEN_CHARS,
+  SpeechQueue,
+  spokenText,
+  submittedSentence,
+} from "./speech.ts";
 
 function intent(overrides: Partial<Intent> = {}): Intent {
   return { kind: "send", asset: "USDC", amount: "5", ...overrides };
@@ -299,4 +308,42 @@ test("a confirmation is never affected by the cap", () => {
   });
   assert.equal(spoken, "Sending 5 USDC to bilal. Do you confirm?");
   assert.ok(spoken.length < MAX_SPOKEN_CHARS);
+});
+
+test("a submitted payment is announced as a statement, not a confirmation (W4b)", () => {
+  assert.equal(
+    submittedSentence(intent({ recipient: "acc2" }), "en"),
+    "Sent 5 USDC to acc2.",
+  );
+  assert.equal(
+    submittedSentence(intent({ recipient: "acc2" }), "tr"),
+    "acc2 adresine 5 USDC gönderildi.",
+  );
+  // Unknown/absent language falls back to English.
+  assert.equal(submittedSentence(intent({ recipient: "acc2" })), "Sent 5 USDC to acc2.");
+});
+
+test("a non-send intent has a neutral submitted sentence", () => {
+  assert.equal(submittedSentence({ kind: "swap", asset: "USDC", amount: "5" }, "en"), "Done.");
+  assert.equal(submittedSentence({ kind: "swap", asset: "USDC", amount: "5" }, "tr"), "Tamamlandı.");
+});
+
+test("the signing failure labels are spoken short and localized", () => {
+  assert.equal(failureSentence("Cancelled", "en"), "Cancelled.");
+  assert.equal(failureSentence("Cancelled", "tr"), "İptal edildi.");
+  assert.equal(failureSentence("Wallet didn't sign", "tr"), "Cüzdan imzalamadı.");
+  assert.equal(failureSentence("Not approved", "en"), "Cancelled.");
+});
+
+test("an unknown failure label is spoken unchanged rather than dropped", () => {
+  assert.equal(failureSentence("Chain error", "en"), "Chain error");
+  assert.equal(failureSentence("Chain error", "tr"), "Chain error");
+});
+
+test("a submitted sentence can never exceed the spoken cap", () => {
+  const long = submittedSentence(
+    { kind: "send", asset: "USDC", amount: "5", recipient: "x".repeat(200) },
+    "en",
+  );
+  assert.ok(long.length <= MAX_SPOKEN_CHARS, `length ${long.length}`);
 });

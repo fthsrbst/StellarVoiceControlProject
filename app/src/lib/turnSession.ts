@@ -9,11 +9,10 @@
  * mid-turn snap the owner reported.
  *
  * This module replaces that with a single value. A turn is one immutable session
- * that starts at the hotkey (capture `recording`) and ends exactly once, either
- * when playback finishes or after a failure has been shown for its dwell. No
- * intermediate signal may collapse it: the only signals that return `null` are
- * `speech_finished` (a healthy turn ending) and `settled` (a failure's dwell
- * elapsing).
+ * that starts at the hotkey (capture `recording`) and ends exactly once, after a
+ * terminal stage has had its dwell. No intermediate signal may collapse it: the
+ * only signals that return `null` are `settled` (a terminal stage's dwell
+ * elapsing) and an already-idle `null`.
  *
  * ## Every stage is entered by the event that actually marks it (A9)
  *
@@ -30,32 +29,73 @@
  * - `speaking` — only a `speech_started` signal, which the shell raises from the
  *   Rust `speech_status: speaking` event the backend emits at **real playback
  *   start**. A synthesis-only wait can therefore never show "Speaking".
+ * - `awaiting_approval` / `signing` / `submitting` — the value-moving path (F1),
+ *   reported by `onStage` at the real boundaries (approval requested, wallet
+ *   bridge, submit). See below.
+ * - `done` / `error` — the two terminal stages. Collapsing is only ever allowed
+ *   from here (or from an already-idle `null`), which is the invariant the F1
+ *   bug was about: the notch used to shrink while the model, the approval card
+ *   or the signer was still busy.
  *
- * The old `checking` stage (validating the tool arguments into an `Intent`) is
- * gone: that validation is synchronous and takes microseconds, so a label for it
- * could never be read. The report records that measurement rather than flashing
- * an unreadable state.
+ * ## The payment path stays open until it settles (F1)
+ *
+ * `executeApprovedIntent`/`signAndSubmit`/the Touch ID approver invoke an
+ * additive `onStage` callback at their boundaries, and the shell folds those
+ * into the same session. Because the approval card and the Freighter round trip
+ * can each take far longer than the old 60 s `thinking` watchdog, a pending
+ * payment now owns the notch: a new hotkey press is refused with a soft notice
+ * instead of superseding (and thereby hiding) it. The watchdogs below give every
+ * stage its own ceiling, plus one total ceiling for the whole turn.
+ *
+ * The validation of tool arguments into an `Intent` has no stage: it is
+ * synchronous and takes microseconds, so a label for it could never be read.
  *
  * It is pure on purpose — no React, no Tauri, no timers. The failure dwell and
- * the stuck-turn watchdog are scheduled by the caller and delivered as ordinary
- * signals, so the machine is deterministic and unit-testable
- * (`turnSession.test.ts`).
+ * the watchdogs are scheduled by the caller and delivered as ordinary signals,
+ * so the machine is deterministic and unit-testable (`turnSession.test.ts`).
  */
 import type { CaptureState } from "@polaris/interfaces";
+import { languageBase } from "@polaris/agent";
 
 /**
- * The visible phase of a live turn. `failed` is terminal but still visible: the
- * shell stays expanded with the short failure label until the caller settles it.
+ * The visible phase of a live turn. `done` and `error` are terminal but still
+ * visible: the shell stays expanded with the stage's short label until the
+ * caller settles the session.
  */
-export type TurnStage = "listening" | "thinking" | "speaking" | "failed";
+export type TurnStage =
+  | "listening"
+  | "thinking"
+  | "speaking"
+  | "awaiting_approval"
+  | "signing"
+  | "submitting"
+  | "done"
+  | "error";
 
-/** One turn, from hotkey-down to the single moment it ends. */
+/**
+ * The stages of the value-moving path (F1). These are exactly the stages an
+ * executor reports through `onStage`, so a stale or out-of-order report cannot
+ * invent a listening/thinking/speaking stage of its own.
+ */
+export type PaymentStage = Extract<TurnStage, "awaiting_approval" | "signing" | "submitting">;
+
+/** The stages a turn may end in; only their dwell may collapse the shell. */
+export type TerminalStage = Extract<TurnStage, "done" | "error">;
+
+/** A soft, non-error hint shown when a new take was refused mid-payment (F1). */
+export type TurnNotice = "payment_pending";
+
+/** One turn, from hotkey-down to the moment its terminal dwell ends. */
 export interface TurnSession {
   /** Monotonic id; lets effects re-arm per turn without extra state. */
   readonly id: number;
   readonly stage: TurnStage;
-  /** Short, ear-safe label for a `failed` stage; null while the turn is healthy. */
+  /** Short, ear-safe label for an `error`; null while the turn is healthy. */
   readonly failureLabel: string | null;
+  /** Soft hint (see `noticeLabel`); null unless a take was refused mid-payment. */
+  readonly notice: TurnNotice | null;
+  /** BCP-47 language of the turn, for the stage labels; null until it is known. */
+  readonly language: string | null;
 }
 
 /** Everything that can move a session. Raw capture states are passed through. */
@@ -63,6 +103,10 @@ export type TurnSignal =
   | { type: "capture"; state: CaptureState; label: string | null }
   /** The final transcript was handed to the agent (the agent's `thinking` stage). */
   | { type: "transcribed" }
+  /** The turn's reconciled BCP-47 language became known; drives the labels. */
+  | { type: "language"; language: string | null }
+  /** An executor boundary of the payment path (F1). */
+  | { type: "stage"; stage: PaymentStage }
   | { type: "failed"; label: string }
   | { type: "speech_started" }
   | { type: "speech_finished" }
@@ -70,19 +114,67 @@ export type TurnSignal =
 
 const nextId = (session: TurnSession | null): number => (session?.id ?? 0) + 1;
 
+/** A fresh, healthy session in its first stage. */
+function start(id: number): TurnSession {
+  return { id, stage: "listening", failureLabel: null, notice: null, language: null };
+}
+
+/**
+ * Enters the terminal `error` stage. Idempotent: a second failure while already
+ * terminal returns the same session, so a turn settles exactly once and a late
+ * failure cannot re-open the dwell.
+ */
 function fail(session: TurnSession | null, label: string): TurnSession {
-  return { id: nextId(session), stage: "failed", failureLabel: label };
+  if (session !== null && isTerminalStage(session.stage)) return session;
+  return {
+    id: nextId(session),
+    stage: "error",
+    failureLabel: label,
+    notice: null,
+    language: session?.language ?? null,
+  };
+}
+
+/** True for the approval/signing/submitting stages that own a pending payment. */
+export function isPaymentStage(stage: TurnStage): stage is PaymentStage {
+  return stage === "awaiting_approval" || stage === "signing" || stage === "submitting";
+}
+
+/** True for the stages the shell may collapse after; `null` is the idle pill. */
+export function isTerminalStage(stage: TurnStage): stage is TerminalStage {
+  return stage === "done" || stage === "error";
+}
+
+/** True for every stage the notch must stay expanded through (F1 invariant). */
+export function isActiveStage(stage: TurnStage): boolean {
+  return !isTerminalStage(stage);
+}
+
+/**
+ * Advances along the payment path. Only the real forward edges are accepted, so
+ * an out-of-order or duplicated `onStage` cannot move the turn backwards (and a
+ * stale one from a superseded turn cannot move a newer one at all).
+ */
+function advancePayment(session: TurnSession, stage: PaymentStage): TurnSession {
+  const from = session.stage;
+  const reaches =
+    (stage === "awaiting_approval" && (from === "thinking" || from === "speaking")) ||
+    (stage === "signing" && from === "awaiting_approval") ||
+    (stage === "submitting" && from === "signing");
+  return reaches ? { ...session, stage, notice: null } : session;
 }
 
 /**
  * Folds one signal into the current session (or `null` when no turn is live).
  *
  * Guarantees, each pinned by a test:
- * - a healthy turn is never `null` between `recording` and `speech_finished`;
+ * - a healthy turn is never `null` between `recording` and its terminal dwell;
  * - capture `ready` / `transcribing` / `idle` only advance or hold the stage,
  *   never end the session — `idle` is the STT gap that used to collapse the shell;
  * - `speaking` is reachable **only** through `speech_started`, and only from
- *   `thinking`; no other signal can enter it early;
+ *   `thinking` (the model answer) or `submitting` (the post-submit confirmation);
+ * - a pending payment owns the notch: `recording` while an approval is in flight
+ *   is refused with a soft notice, never superseded;
  * - a failure ends the session exactly once, via one `settled`;
  * - a stale `speech_*` from a superseded turn cannot move or end a newer one.
  */
@@ -92,11 +184,18 @@ export function reduceTurnSession(
 ): TurnSession | null {
   switch (signal.type) {
     case "capture": {
+      // F1: a payment in flight must not be hidden. A new take (the hotkey) is
+      // refused with a soft notice so the user sees why nothing happened; every
+      // other capture signal belongs to that ignored take and is dropped too, so
+      // its release/error cannot settle the approval.
+      if (session !== null && isPaymentStage(session.stage)) {
+        return signal.state === "recording" ? { ...session, notice: "payment_pending" } : session;
+      }
       switch (signal.state) {
         // A new take always starts a fresh session and supersedes whatever the
         // shell was showing (a previous failure or a still-playing answer).
         case "recording":
-          return { id: nextId(session), stage: "listening", failureLabel: null };
+          return start(nextId(session));
         case "error":
           return fail(session, signal.label ?? "Mic error");
         // Release and transcription move the turn into "thinking" — from here
@@ -122,19 +221,30 @@ export function reduceTurnSession(
       return session !== null && session.stage === "listening"
         ? { ...session, stage: "thinking" }
         : session;
+    case "language":
+      // Labels only; a language report can never open or end a turn.
+      return session !== null ? { ...session, language: signal.language } : session;
+    case "stage":
+      return session !== null ? advancePayment(session, signal.stage) : session;
     case "failed":
       return fail(session, signal.label);
     case "speech_started":
-      // Only a turn that is still waiting on the model/voice may start speaking;
-      // a queued or stale utterance from a previous turn is ignored. Crucially,
-      // this is the *single* way into `speaking`.
-      return session?.stage === "thinking" ? { ...session, stage: "speaking" } : session;
+      // The model answer (`thinking`) or the post-submit confirmation
+      // (`submitting`) may start real playback; a queued or stale utterance from
+      // a previous turn is ignored. Crucially, this is the *single* way in.
+      return session !== null &&
+        (session.stage === "thinking" || session.stage === "submitting")
+        ? { ...session, stage: "speaking", notice: null }
+        : session;
     case "speech_finished":
-      // A healthy turn completes here — the one and only place it ends itself.
-      return session?.stage === "speaking" ? null : session;
+      // A healthy turn completes here — and only into `done`, so the collapse
+      // always happens from a terminal stage.
+      return session !== null && session.stage === "speaking"
+        ? { ...session, stage: "done" }
+        : session;
     case "settled":
-      // The failure dwell elapsed; the failed session is over.
-      return session?.stage === "failed" ? null : session;
+      // The terminal dwell elapsed; the session is over.
+      return session !== null && isTerminalStage(session.stage) ? null : session;
   }
 }
 
@@ -144,23 +254,61 @@ export function isTurnExpanded(session: TurnSession | null): boolean {
 }
 
 /* ------------------------------------------------------------------ *
- * Stuck-stage watchdogs (M4)
+ * Stage labels (F1)
+ * ------------------------------------------------------------------ */
+
+/** Short, ear-safe label per stage; the label is the only drawn text. */
+const STAGE_LABELS: Record<TurnStage, { en: string; tr: string }> = {
+  listening: { en: "Listening", tr: "Dinliyorum" },
+  thinking: { en: "Thinking", tr: "Düşünüyorum" },
+  speaking: { en: "Speaking", tr: "Konuşuyorum" },
+  awaiting_approval: { en: "Approve in Polaris", tr: "Polaris'te onayla" },
+  signing: { en: "Waiting for Freighter", tr: "Freighter bekleniyor" },
+  submitting: { en: "Sending", tr: "Gönderiliyor" },
+  done: { en: "Done", tr: "Tamam" },
+  error: { en: "Error", tr: "Hata" },
+};
+
+const NOTICE_LABELS: Record<TurnNotice, { en: string; tr: string }> = {
+  payment_pending: { en: "Approve first", tr: "Önce onayla" },
+};
+
+/** Picks the Turkish string for a `tr` turn, English otherwise. */
+function localized(text: { en: string; tr: string }, language: string | null): string {
+  return languageBase(language ?? undefined) === "tr" ? text.tr : text.en;
+}
+
+/** The short notch label for a stage, in the turn's language. */
+export function stageLabel(stage: TurnStage, language: string | null): string {
+  return localized(STAGE_LABELS[stage], language);
+}
+
+/** The soft label shown when a take was refused because a payment is pending. */
+export function noticeLabel(notice: TurnNotice, language: string | null): string {
+  return localized(NOTICE_LABELS[notice], language);
+}
+
+/* ------------------------------------------------------------------ *
+ * Stuck-stage watchdogs (M4, ceilings retuned in F1)
  * ------------------------------------------------------------------ */
 
 /**
- * How long the model/TTS wait may sit in `thinking` before the shell abandons
- * it. Far beyond every legitimate phase (the model request itself is capped at
- * 30 s), so it only fires when an upstream event is genuinely lost.
+ * Per-stage ceilings. `thinking` bounds the model + TTS-synthesis wait;
+ * `speaking` bounds playback. The payment stages get their own, longer bounds
+ * because the approval card and the wallet round trip are human-paced: the
+ * ceilings track the Rust approval TTL (120 s) and the wallet's own timeout.
  */
-export const THINKING_WATCHDOG_MS = 60_000;
+export const THINKING_WATCHDOG_MS = 30_000;
+export const SPEAKING_WATCHDOG_MS = 45_000;
+export const APPROVAL_WATCHDOG_MS = 140_000;
+export const SIGNING_WATCHDOG_MS = 170_000;
+export const SUBMITTING_WATCHDOG_MS = 60_000;
 
 /**
- * How long `speaking` may last before the shell assumes the player is wedged.
- * Playback normally ends itself via `speech_status: idle`, but a player that
- * never returns would otherwise hold the notch open forever (the speech drain
- * is unbounded). Generous on purpose: a long sentence is not a stuck one.
+ * One ceiling for the whole turn, independent of any single stage. Even if every
+ * stage recovers just inside its own bound the turn cannot outlive this.
  */
-export const SPEAKING_WATCHDOG_MS = 120_000;
+export const TOTAL_WATCHDOG_MS = 6 * 60_000;
 
 /** The recovery timer for one non-terminal stage. */
 export interface StageWatchdog {
@@ -172,10 +320,9 @@ export interface StageWatchdog {
 /**
  * The watchdog for a live stage, or `null` when the stage recovers by itself.
  *
- * Returns a bound for both `thinking` (the pre-speech wait) and `speaking` (a
- * wedged player). `listening` ends on the hotkey release and `failed` ends on
- * its own dwell, so neither needs a timer here. The caller schedules and clears
- * the timer; this function stays pure so the policy is unit-testable.
+ * `listening` ends on the hotkey release and the terminal stages on their own
+ * dwell, so neither needs a timer here. The caller schedules and clears the
+ * timer; this function stays pure so the policy is unit-testable.
  */
 export function stageWatchdog(stage: TurnStage): StageWatchdog | null {
   switch (stage) {
@@ -183,8 +330,15 @@ export function stageWatchdog(stage: TurnStage): StageWatchdog | null {
       return { timeoutMs: THINKING_WATCHDOG_MS, label: "Timed out" };
     case "speaking":
       return { timeoutMs: SPEAKING_WATCHDOG_MS, label: "Voice error" };
+    case "awaiting_approval":
+      return { timeoutMs: APPROVAL_WATCHDOG_MS, label: "Approval timed out" };
+    case "signing":
+      return { timeoutMs: SIGNING_WATCHDOG_MS, label: "Wallet timed out" };
+    case "submitting":
+      return { timeoutMs: SUBMITTING_WATCHDOG_MS, label: "Submit timed out" };
     case "listening":
-    case "failed":
+    case "done":
+    case "error":
       return null;
   }
 }
@@ -204,4 +358,21 @@ export function stageWatchdog(stage: TurnStage): StageWatchdog | null {
  */
 export function isCurrentTurn(session: TurnSession | null, turnId: number | undefined): boolean {
   return turnId !== undefined && session?.id === turnId;
+}
+
+/**
+ * Whether an execution outcome may still touch the UI (F1).
+ *
+ * A non-submitted result obeys the M1 cross-turn guard exactly as before. A
+ * **submitted** transaction is always surfaced, even when a watchdog already
+ * settled its turn as failed: value has moved, and the user must never lose the
+ * confirmation or the explorer link because the notch timed out first (the F1
+ * scenario the review calls MAJOR-1).
+ */
+export function shouldSurfaceOutcome(
+  session: TurnSession | null,
+  turnId: number | undefined,
+  submitted: boolean,
+): boolean {
+  return submitted || isCurrentTurn(session, turnId);
 }
