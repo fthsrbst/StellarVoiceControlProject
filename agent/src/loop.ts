@@ -2,7 +2,7 @@ import type { Intent } from "@polaris/interfaces";
 import { AgentError, isAgentError } from "./errors.ts";
 import type { PolarisEventBus } from "./events.ts";
 import { resolveTurnLanguage } from "./language.ts";
-import { POLARIS_SYSTEM_PROMPT, withDetectedLanguage } from "./prompt.ts";
+import { POLARIS_SYSTEM_PROMPT, withClock, withDetectedLanguage } from "./prompt.ts";
 import type { AgentTool, ToolContext, ToolRegistry } from "./tools/registry.ts";
 
 /** A single tool invocation requested by the model. */
@@ -77,6 +77,17 @@ export interface AgentTurnResult {
 /** Short human summary of an intent; the UI's single-line intent display. */
 export function describeIntent(intent: Intent): string {
   const recipient = intent.recipient ?? intent.alias ?? "(unknown recipient)";
+  if (intent.kind === "cancel_schedule") {
+    return intent.scheduleId !== undefined
+      ? `Cancel scheduled payment #${intent.scheduleId}.`
+      : `Cancel the scheduled payment to ${recipient}.`;
+  }
+  if (intent.kind === "schedule_payment") {
+    const when = intent.firstRun
+      ? ` starting ${intent.firstRun.localDate} ${intent.firstRun.localTime}`
+      : "";
+    return `Schedule ${intent.amount} ${intent.asset} to ${recipient}${when}.`;
+  }
   return `Send ${intent.amount} ${intent.asset} to ${recipient}.`;
 }
 
@@ -103,9 +114,10 @@ export async function runTurn(options: AgentTurnOptions): Promise<AgentTurnResul
     transcript,
     ...options.toolContext,
   };
-  const system = withDetectedLanguage(
-    options.system ?? POLARIS_SYSTEM_PROMPT,
-    options.transcriptLanguage,
+  const system = withClock(
+    withDetectedLanguage(options.system ?? POLARIS_SYSTEM_PROMPT, options.transcriptLanguage),
+    options.toolContext?.now ?? new Date(),
+    options.toolContext?.timeZone,
   );
 
   try {

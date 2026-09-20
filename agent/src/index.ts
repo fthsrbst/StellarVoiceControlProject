@@ -36,7 +36,7 @@ export {
   type LlmToolCall,
   type LlmTurn,
 } from "./loop.ts";
-export { POLARIS_SYSTEM_PROMPT, withDetectedLanguage } from "./prompt.ts";
+export { POLARIS_SYSTEM_PROMPT, withClock, withDetectedLanguage } from "./prompt.ts";
 export {
   ASSET_SYNONYMS,
   DEFAULT_ASSET,
@@ -114,3 +114,14 @@ export {
   sendPaymentTool,
   type SendPaymentInput,
 } from "./tools/payment.ts";
+export {
+  cancelScheduleTool,
+  isValidTimeZone,
+  normalizeRepeat,
+  normalizeWhich,
+  parseCancelSchedule,
+  parseSchedulePayment,
+  schedulePaymentTool,
+  type CancelScheduleInput,
+  type SchedulePaymentInput,
+} from "./tools/schedule.ts";

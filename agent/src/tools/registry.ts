@@ -10,6 +10,14 @@ export interface ToolContext {
   transcript: string;
   /** Testnet-only in this project (see docs/architecture.md §1 "Non-goals"). */
   network: "testnet";
+  /**
+   * The device's IANA zone, used to interpret schedule wall-clock times when the
+   * user named no zone (W6b). Optional so workers that do not need it can omit
+   * it; schedule tools fall back to `Intl`'s resolved zone.
+   */
+  timeZone?: string;
+  /** The turn's clock, for "tomorrow"/"next Friday" resolution and tests. */
+  now?: Date;
 }
 
 /**
