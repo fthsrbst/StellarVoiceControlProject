@@ -42,6 +42,7 @@
 | 2026-09-20 | **W6a-fix — review corrections**: per-step resequencing in shared `runTxSequence` (B1, reuses `resequenceEnvelope`), mode-driven plan (M2), alias union + read-failed (M3), honest wording/amounts + in-flight double-click guard (N4–N8) | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/w6a-security-panel.md` | P0 |
 | 2026-09-20 | **Notch shell port onto `main`** + BUG-1 left-edge flash + BUG-2 voice animation. Port and both fixes are in; only the BUG-1 "after" screen recording is blocked (machine locked its screen mid-verification) | opencode worker (`opencode-go/deepseek-v4.1-flash`) | open (verification pending) | `backlog/2026-09-20-notch-shell-port.md` | P1 |
 | 2026-09-20 | **Notch pages voice wiring**: call `setNotchPage(...)` (seam in `app/src/notch/notchPage.ts`) from Turkish intents + propose the `panel` state; then wire the 4 mock pages to real data | Owner A | open | `backlog/2026-09-20-notch-pages.md` | P1 |
+| 2026-09-20 | **W8a — P2P escrow contract** `polaris_p2p_escrow`: built + 20 tests + testnet deploy `CBMXLTXS76S72SIPLVMCQOSS6SN2CR4V3Q73GZPRA4GRIBEM7RE5OLJW`; TS client + order-book UI pending | Worker (opencode) | open | `backlog/w8a-p2p-escrow.md` | P1 |
 
 ## Completed Tasks (Archive)
 

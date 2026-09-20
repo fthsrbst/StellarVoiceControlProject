@@ -232,6 +232,7 @@
 - [ ] Demo video recorded + pitch deck
 - [ ] Docs synced: notes.md, backlog reports, docs/reports/INDEX.md, sprints.md all up to date
 - [ ] (bonus, if everything above is done) passkey wallet / P2P escrow / developer mode
+- [ ] (2026-09-20, W8a) P2P escrow contract `polaris_p2p_escrow`: built, 20 tests, testnet-deployed `CBMXLTX…` — TS client + order-book UI pending review
 
 ---
 

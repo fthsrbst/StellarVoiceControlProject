@@ -1,0 +1,16 @@
+[package]
+name = "polaris_p2p_escrow"
+description = "Polaris P2P escrow: TRY<->USDC peer-to-peer ramp on Stellar (testnet only)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
