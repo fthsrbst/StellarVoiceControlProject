@@ -83,6 +83,11 @@ struct RunContext {
     assets: Arc<dyn AssetProvider>,
     launcher: Arc<dyn BrowserLauncher>,
     browser: Option<String>,
+    /// True when the payload is a SEP-10 login challenge: the result is verified
+    /// with [`verify::verify_challenge`] (the challenge already carries the
+    /// anchor's signature and the wallet adds one) instead of the normal
+    /// single-signature check.
+    challenge: bool,
 }
 
 /// Why a [`RunContext`] could not be built. [`BridgeOutcome`] is large, so it is
@@ -102,18 +107,39 @@ impl RunContext {
         launcher: Arc<dyn BrowserLauncher>,
         browser: Option<String>,
     ) -> ContextResult {
+        Self::from_authorized_mode(
+            released, config, owner, assets, launcher, browser, false,
+        )
+    }
+
+    /// The shared constructor behind [`RunContext::from_authorized`] (normal
+    /// signed transaction) and the anchor challenge path (`challenge = true`).
+    /// In challenge mode the payload's source is the anchor, not the owner, so
+    /// the signer-hint comparison is skipped.
+    #[allow(clippy::too_many_arguments)]
+    fn from_authorized_mode(
+        released: crate::approval::AuthorizedPayload,
+        config: &stellar_config::StellarConfig,
+        owner: &str,
+        assets: Arc<dyn AssetProvider>,
+        launcher: Arc<dyn BrowserLauncher>,
+        browser: Option<String>,
+        challenge: bool,
+    ) -> ContextResult {
         let Some(signer_key) = strkey::decode_public_key(owner) else {
             return Err(Box::new(BridgeOutcome::fail(
                 "address_mismatch",
                 "the configured owner address is not a valid G... address",
             )));
         };
-        if let Some(hint) = released.signer_hint.as_deref() {
-            if hint != &signer_key[28..32] {
-                return Err(Box::new(BridgeOutcome::fail(
-                    "address_mismatch",
-                    "the transaction source does not match the configured owner address",
-                )));
+        if !challenge {
+            if let Some(hint) = released.signer_hint.as_deref() {
+                if hint != &signer_key[28..32] {
+                    return Err(Box::new(BridgeOutcome::fail(
+                        "address_mismatch",
+                        "the transaction source does not match the configured owner address",
+                    )));
+                }
             }
         }
         let payload = BridgePayload {
@@ -129,6 +155,7 @@ impl RunContext {
             assets,
             launcher,
             browser,
+            challenge,
         })
     }
 
@@ -195,12 +222,22 @@ impl RunContext {
             }
         }
 
-        match verify::verify_signed(
-            &self.payload.xdr,
-            &signed_xdr,
-            &self.signer_key,
-            &self.payload.network_passphrase,
-        ) {
+        let verified = if self.challenge {
+            verify::verify_challenge(
+                &self.payload.xdr,
+                &signed_xdr,
+                &self.signer_key,
+                &self.payload.network_passphrase,
+            )
+        } else {
+            verify::verify_signed(
+                &self.payload.xdr,
+                &signed_xdr,
+                &self.signer_key,
+                &self.payload.network_passphrase,
+            )
+        };
+        match verified {
             Ok(hash) => {
                 let tx_hash = hex::encode(hash);
                 println!("polaris: bridge outcome=ok tx={tx_hash}");
@@ -319,6 +356,7 @@ pub async fn bridge_selftest(
         assets: asset_provider(&app),
         launcher: Arc::clone(launcher.inner()),
         browser: launch::configured_browser(crate::env::var),
+        challenge: false,
     };
     run_blocking(context).await
 }
@@ -387,6 +425,156 @@ fn validate_selftest_xdr(
         )));
     }
     Ok(Ok(signer_key))
+}
+
+/// `bridge_sign_challenge(xdr)`: signs a SEP-10 login challenge with the wallet,
+/// **without Touch ID**, because a sequence-0 challenge can never be applied
+/// on-chain. This is the only wallet-only signing path.
+///
+/// Safety comes in two layers:
+///
+/// 1. [`validate_challenge_xdr`] rejects any XDR that is not a sequence-0,
+///    anchor-signed challenge before the gate is touched. A real payment
+///    (sequence > 0) can therefore never reach the browser. (The operation-type
+///    check is deliberately not done parse-free — see the `verify` module docs
+///    for the documented residual risk.)
+/// 2. The request is created through the gate's in-process
+///    [`ApprovalStore::begin_wallet_only`] and authorized through
+///    [`ApprovalStore::authorize_wallet_only`], so the same
+///    record → authorize → consume state machine runs — while
+///    `approval_begin`/`approval_authorize` still refuse `WalletOnly` (tested).
+///
+/// The returned envelope is verified by [`verify::verify_challenge`]: same body
+/// bytes, exactly one added Ed25519 signature by the configured owner.
+#[tauri::command]
+pub async fn bridge_sign_challenge(
+    app: AppHandle,
+    store: State<'_, ApprovalStore>,
+    launcher: State<'_, Arc<dyn BrowserLauncher>>,
+    xdr: String,
+) -> Result<BridgeOutcome, String> {
+    let config = stellar_config::read();
+    let Some(owner) = config.owner_address.clone() else {
+        return Ok(BridgeOutcome::fail(
+            "address_mismatch",
+            "no owner address is configured; set POLARIS_OWNER_ADDRESS",
+        ));
+    };
+    // Layer 1: prove the payload is a safe-to-sign challenge before the gate.
+    match validate_challenge_xdr(&xdr, &owner) {
+        Ok(Ok(())) => {}
+        Ok(Err(outcome)) => return Ok(outcome),
+        Err(error) => return Err(error),
+    }
+    // Layer 2: the in-process wallet-only request, authorized without a prompt.
+    let request = crate::approval::ApprovalRequest {
+        id: String::new(),
+        payload_hash: crate::approval::payload_hash_of_xdr(&xdr),
+        unsigned_xdr: xdr,
+        summary: crate::types::TxSummary {
+            title: "Sign an anchor login challenge".to_string(),
+            lines: vec![
+                "This challenge has sequence 0 and can never be applied on-chain.".to_string(),
+            ],
+            explorer_url: None,
+            estimated_fee: "0.0000100 XLM".to_string(),
+        },
+        intent: crate::types::Intent {
+            kind: crate::types::IntentKind::RawTx,
+            asset: "XLM".to_string(),
+            amount: "0".to_string(),
+            recipient: None,
+            alias: None,
+            memo: None,
+            source: None,
+        },
+        mode: crate::approval::ApprovalMode::WalletOnly,
+        origin: Some("anchor".to_string()),
+    };
+    let id = match store.begin_wallet_only(request) {
+        Ok(outcome) => outcome.request.id,
+        Err(error) => return Ok(BridgeOutcome::fail("not_authorized", error.detail())),
+    };
+    if let Err(error) = store.authorize_wallet_only(&id) {
+        return Ok(BridgeOutcome::fail("not_authorized", error.detail()));
+    }
+    let released = match store.take_authorized(&id) {
+        Ok(payload) => payload,
+        Err(error) => return Ok(BridgeOutcome::fail("not_authorized", error.detail())),
+    };
+
+    let context = match RunContext::from_authorized_mode(
+        released,
+        &config,
+        &owner,
+        asset_provider(&app),
+        Arc::clone(launcher.inner()),
+        launch::configured_browser(crate::env::var),
+        true,
+    ) {
+        Ok(context) => context,
+        Err(outcome) => return Ok(*outcome),
+    };
+    run_blocking(context).await
+}
+
+/// The challenge's hard safety rule, enforced independently of the page: the
+/// envelope must be a v1 transaction, have sequence number exactly `0`, carry
+/// exactly one signature already (the anchor's), and not be sourced by the owner.
+/// Anything else is an `integrity` refusal.
+///
+/// Split from the command so the rule is unit-testable without a Tauri app. The
+/// nested `Result` keeps the large `BridgeOutcome` out of the error position (the
+/// same shape `validate_selftest_xdr` uses): the outer `Err` is only the
+/// impossible internal failure.
+fn validate_challenge_xdr(xdr: &str, owner: &str) -> Result<Result<(), BridgeOutcome>, String> {
+    if xdr.len() > MAX_BODY_BYTES {
+        return Ok(Err(BridgeOutcome::integrity(VerifyError::Truncated)));
+    }
+    let Some(owner_key) = strkey::decode_public_key(owner) else {
+        return Ok(Err(BridgeOutcome::fail(
+            "address_mismatch",
+            "the configured owner address is not a valid G... address",
+        )));
+    };
+    let bytes = match verify::decode_envelope(xdr) {
+        Ok(bytes) => bytes,
+        Err(error) => return Ok(Err(BridgeOutcome::integrity(error))),
+    };
+    let parsed = match verify::parse_envelope(&bytes) {
+        Ok(parsed) => parsed,
+        Err(error) => return Ok(Err(BridgeOutcome::integrity(error))),
+    };
+    if parsed.sequence != 0 {
+        return Ok(Err(BridgeOutcome::fail(
+            "integrity",
+            "the challenge sequence number is not 0, so it could be applied on-chain",
+        )));
+    }
+    if parsed.source == owner_key {
+        return Ok(Err(BridgeOutcome::fail(
+            "integrity",
+            "the challenge source account is the owner, so signing it would authorize an owner transaction",
+        )));
+    }
+    if parsed.signatures.len() != 1 {
+        return Ok(Err(BridgeOutcome::integrity(
+            VerifyError::ChallengeNoServerSignature,
+        )));
+    }
+    Ok(Ok(()))
+}
+
+/// `anchor_signing_health()`: the non-prompting Debug check for wallet-only
+/// anchor signing. It proves a loopback listener can bind and reports the seq-0
+/// rule as active; it never shows a prompt and never opens a browser.
+#[tauri::command]
+pub fn anchor_signing_health(app: AppHandle) -> crate::health::FeatureHealth {
+    let config = stellar_config::read();
+    super::server::challenge_health(
+        asset_provider(&app).as_ref(),
+        config.owner_address.as_deref(),
+    )
 }
 
 /// `bridge_health()`: the non-prompting Debug check.
@@ -499,6 +687,9 @@ mod tests {
     struct PageLauncher {
         seed: [u8; 32],
         tamper: bool,
+        /// True when the payload is a pre-signed challenge the page must add one
+        /// signature to, rather than an unsigned transaction.
+        challenge: bool,
     }
 
     impl BrowserLauncher for PageLauncher {
@@ -514,7 +705,14 @@ mod tests {
 
             let payload = get_json(port, &format!("/sign/payload?t={token}"));
             let xdr = payload["xdr"].as_str().unwrap().to_string();
-            let (mut signed, _) = signed_by(&xdr, self.seed);
+            let (mut signed, _) = if self.challenge {
+                (
+                    verify::tests_support::add_signature_existing(&xdr, self.seed),
+                    String::new(),
+                )
+            } else {
+                signed_by(&xdr, self.seed)
+            };
             if self.tamper {
                 // Flip a bit in the signature so Rust's independent check fails.
                 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -602,8 +800,9 @@ mod tests {
             payload: payload(&address, &xdr),
             signer_key: public,
             assets: Arc::new(FakeAssets),
-            launcher: Arc::new(PageLauncher { seed, tamper: false }),
+            launcher: Arc::new(PageLauncher { seed, tamper: false, challenge: false }),
             browser: None,
+            challenge: false,
         };
         let expected_hash = {
             let bytes = verify::decode_envelope(&xdr).unwrap();
@@ -626,8 +825,9 @@ mod tests {
             payload: payload(&address, &xdr),
             signer_key: public,
             assets: Arc::new(FakeAssets),
-            launcher: Arc::new(PageLauncher { seed, tamper: true }),
+            launcher: Arc::new(PageLauncher { seed, tamper: true, challenge: false }),
             browser: None,
+            challenge: false,
         };
         let outcome = context.run();
         assert!(!outcome.ok);
@@ -648,8 +848,10 @@ mod tests {
             launcher: Arc::new(PageLauncher {
                 seed: [7u8; 32],
                 tamper: false,
+                challenge: false,
             }),
             browser: None,
+            challenge: false,
         };
         let outcome = context.run();
         assert!(!outcome.ok);
@@ -690,6 +892,7 @@ mod tests {
             assets: Arc::new(FakeAssets),
             launcher: Arc::new(RefusingLauncher),
             browser: None,
+            challenge: false,
         };
         let outcome = context.run();
         assert!(!outcome.ok);
@@ -775,6 +978,7 @@ mod tests {
             Arc::new(PageLauncher {
                 seed: OWNER_KEY,
                 tamper: false,
+                challenge: false,
             }),
             None,
         )
@@ -863,5 +1067,101 @@ mod tests {
         let provider = DirAssetProvider::new(&root);
         assert!(provider.get("/sign").is_some());
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// The anchor fixture's owner address (`GDVE…`) and the challenge XDR.
+    const CHALLENGE_OWNER_ADDRESS: &str =
+        "GDVEU3DD4KOFECV66VIHWEZOYX4ZKR3WV27L464SIIPOU2IUI3JCZA57";
+    const CHALLENGE_XDR: &str = crate::bridge::verify::tests_support::CHALLENGE_XDR;
+
+    fn challenge_context(owner_key: [u8; 32], challenge: bool) -> RunContext {
+        RunContext {
+            payload: BridgePayload {
+                xdr: CHALLENGE_XDR.to_string(),
+                network_passphrase: PASSPHRASE.to_string(),
+                address: CHALLENGE_OWNER_ADDRESS.to_string(),
+                payload_hash: "hash".to_string(),
+                summary: crate::types::TxSummary {
+                    title: "Sign an anchor login challenge".to_string(),
+                    lines: vec![],
+                    explorer_url: None,
+                    estimated_fee: "0.0000100 XLM".to_string(),
+                },
+            },
+            signer_key: owner_key,
+            assets: Arc::new(FakeAssets),
+            launcher: Arc::new(PageLauncher {
+                seed: crate::bridge::verify::tests_support::CHALLENGE_OWNER_SEED,
+                tamper: false,
+                challenge: true,
+            }),
+            browser: None,
+            challenge,
+        }
+    }
+
+    #[test]
+    fn challenge_command_refuses_a_nonzero_sequence_payment() {
+        // The self-test-style safety rule: a real payment (seq 1) must never be
+        // signable without Touch ID, so it is refused before any browser opens.
+        let owner = strkey::decode_public_key(CHALLENGE_OWNER_ADDRESS).unwrap();
+        let payment = crate::bridge::verify::tests_support::fixture_with_source(owner, 1);
+        let outcome = validate_challenge_xdr(&payment, CHALLENGE_OWNER_ADDRESS).unwrap().unwrap_err();
+        assert_eq!(outcome.code.as_deref(), Some("integrity"));
+        assert!(outcome.message.as_deref().unwrap().contains("sequence"));
+
+        // An owner-sourced challenge is refused too.
+        let owner_sourced = crate::bridge::verify::tests_support::challenge_with_source_and_sequence(
+            owner,
+            0,
+        );
+        let outcome = validate_challenge_xdr(&owner_sourced, CHALLENGE_OWNER_ADDRESS).unwrap().unwrap_err();
+        assert_eq!(outcome.code.as_deref(), Some("integrity"));
+
+        // A malformed envelope is `integrity`.
+        let outcome = validate_challenge_xdr("not-base64 !!!", CHALLENGE_OWNER_ADDRESS).unwrap().unwrap_err();
+        assert_eq!(outcome.code.as_deref(), Some("integrity"));
+    }
+
+    #[test]
+    fn challenge_command_accepts_a_valid_sep10_challenge() {
+        let owner = strkey::decode_public_key(CHALLENGE_OWNER_ADDRESS).unwrap();
+        assert!(matches!(
+            validate_challenge_xdr(CHALLENGE_XDR, CHALLENGE_OWNER_ADDRESS),
+            Ok(Ok(()))
+        ));
+
+        // And a real loopback session verifies the wallet's added signature.
+        let context = challenge_context(owner, true);
+        let outcome = context.run();
+        assert!(outcome.ok, "expected ok, got {outcome:?}");
+        assert_eq!(
+            outcome.tx_hash.as_deref(),
+            Some(crate::bridge::verify::tests_support::CHALLENGE_HASH)
+        );
+    }
+
+    #[test]
+    fn challenge_command_rejects_a_tampered_wallet_signature() {
+        let owner = strkey::decode_public_key(CHALLENGE_OWNER_ADDRESS).unwrap();
+        let mut context = challenge_context(owner, true);
+        context.launcher = Arc::new(PageLauncher {
+            seed: crate::bridge::verify::tests_support::CHALLENGE_OWNER_SEED,
+            tamper: true,
+            challenge: true,
+        });
+        let outcome = context.run();
+        assert!(!outcome.ok);
+        assert_eq!(outcome.code.as_deref(), Some("integrity"));
+    }
+
+    #[test]
+    fn a_normal_signed_flow_still_rejects_a_presigned_challenge() {
+        // The normal (Touch ID) path's verifier requires an unsigned input, so a
+        // pre-signed challenge cannot slip through it.
+        let owner = strkey::decode_public_key(CHALLENGE_OWNER_ADDRESS).unwrap();
+        let context = challenge_context(owner, false);
+        let outcome = context.run();
+        assert!(!outcome.ok);
     }
 }
