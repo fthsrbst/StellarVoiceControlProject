@@ -359,3 +359,20 @@ export function stageWatchdog(stage: TurnStage): StageWatchdog | null {
 export function isCurrentTurn(session: TurnSession | null, turnId: number | undefined): boolean {
   return turnId !== undefined && session?.id === turnId;
 }
+
+/**
+ * Whether an execution outcome may still touch the UI (F1).
+ *
+ * A non-submitted result obeys the M1 cross-turn guard exactly as before. A
+ * **submitted** transaction is always surfaced, even when a watchdog already
+ * settled its turn as failed: value has moved, and the user must never lose the
+ * confirmation or the explorer link because the notch timed out first (the F1
+ * scenario the review calls MAJOR-1).
+ */
+export function shouldSurfaceOutcome(
+  session: TurnSession | null,
+  turnId: number | undefined,
+  submitted: boolean,
+): boolean {
+  return submitted || isCurrentTurn(session, turnId);
+}

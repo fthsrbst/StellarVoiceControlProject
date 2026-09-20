@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { ExecutionOutcome } from "@polaris/agent";
+import type { SubmitResult } from "@polaris/stellar";
 
 import {
   explorerTxUrl,
@@ -198,6 +199,37 @@ test("a failed tx_submitted emit does not fail a successful submission", async (
 test("isBridgeSigned discriminates on the ok field", () => {
   assert.equal(isBridgeSigned(signed), true);
   assert.equal(isBridgeSigned({ ok: false, code: "error", message: "x" }), false);
+});
+
+test("isBridgeSigned rejects a malformed success payload (MINOR-1)", () => {
+  // `ok: true` without a string `signedXdr`/`txHash` is not a usable signature.
+  assert.equal(isBridgeSigned({ ok: true, signerAddress: "G" } as unknown as BridgeOutcome), false);
+  assert.equal(
+    isBridgeSigned({ ok: true, signedXdr: SIGNED, txHash: 42 } as unknown as BridgeOutcome),
+    false,
+  );
+  assert.equal(isBridgeSigned({ ok: true, signedXdr: SIGNED, signerAddress: "G", txHash: TX_HASH }), true);
+});
+
+test("a malformed bridge success is a labelled failure, never a throw", async () => {
+  const { deps: d, calls } = deps({
+    bridge: { ok: true, signerAddress: "G" } as unknown as BridgeOutcome,
+  });
+  const outcome = await signAndSubmit(executed(), d);
+  assert.equal(outcome.status, "failed");
+  assert.equal(outcome.label, "Signing error");
+  assert.deepEqual(calls.submit, []);
+});
+
+test("an injected explorerTxUrl builds the link when submit omits one", async () => {
+  const { deps: d } = deps({
+    bridge: signed,
+    // The real `SubmitResult` always carries a link; exercise the fallback.
+    submit: async () => ({ hash: TX_HASH }) as SubmitResult,
+    explorerTxUrl: (hash) => `https://example.test/tx/${hash}`,
+  });
+  const outcome = await signAndSubmit(executed(), d);
+  assert.equal(outcome.explorerUrl, `https://example.test/tx/${TX_HASH}`);
 });
 
 test("explorerTxUrl builds the canonical testnet link", () => {

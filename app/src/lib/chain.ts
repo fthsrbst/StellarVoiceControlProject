@@ -24,11 +24,12 @@
  * SDK nor the config read. Missing owner address is refused with a clear label
  * ("Set POLARIS_OWNER_ADDRESS") and never guessed.
  *
- * The approver is **fail-closed by default**: a deny-all gate, not Touch ID.
- * Auto-approval is reachable only by explicitly setting
- * `POLARIS_ALLOW_AUTO_APPROVE=1` (for the stubbed demo); otherwise no value can
- * move without a real gesture. Replacing the selection below with the biometric
- * gate is the only change needed to activate the real approval flow; see
+ * The approver is **fail-closed by default**. In a real Tauri runtime the Touch
+ * ID gate (W3) is selected: it registers the exact blob and returns a decision
+ * only when the gate reports `authorized`. Outside Tauri, the loud auto-approval
+ * placeholder is reachable only with `POLARIS_ALLOW_AUTO_APPROVE=1` (the
+ * CLI/demo path); everything else is the deny-all gate. In the app the biometric
+ * gate always wins, so no value can move without a real gesture; see
  * `agent/src/execution.ts` for the seam contract.
  */
 import { isTauri } from "@tauri-apps/api/core";

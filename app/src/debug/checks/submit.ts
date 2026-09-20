@@ -5,8 +5,11 @@
  * and shaped correctly? It never builds, signs or submits a transaction, so it
  * is safe to run automatically. The live end-to-end proof is the real payment a
  * human makes with Freighter.
+ *
+ * The chain package is imported **inside** `run`, not at module scope: the check
+ * registry globs every check eagerly, so a static import here would pull the
+ * whole Stellar SDK into the shell's eager bundle (W4b-2 MAJOR-2).
  */
-import { submitSignedTx } from "@polaris/stellar";
 import { explorerTxUrl } from "@/lib/signing";
 import { errorDetail, makeResult } from "@/debug/runner.ts";
 import type { FeatureCheck } from "@/debug/types.ts";
@@ -18,6 +21,7 @@ export default {
   milestone: "W4",
   async run() {
     try {
+      const { submitSignedTx } = await import("@polaris/stellar");
       if (typeof submitSignedTx !== "function") {
         return makeResult("fail", "submitSignedTx is not exported by @polaris/stellar");
       }

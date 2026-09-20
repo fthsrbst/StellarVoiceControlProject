@@ -12,6 +12,7 @@ import {
   isTurnExpanded,
   noticeLabel,
   reduceTurnSession,
+  shouldSurfaceOutcome,
   SIGNING_WATCHDOG_MS,
   SPEAKING_WATCHDOG_MS,
   stageLabel,
@@ -472,4 +473,30 @@ test("an async result is dropped once its turn id is no longer current", () => {
   assert.equal(isCurrentTurn(newer, 9), false);
   assert.equal(isCurrentTurn(null, 9), false, "no live session means no match");
   assert.equal(isCurrentTurn(older, undefined), false, "an unbound result is never current");
+});
+
+test("a submitted outcome is surfaced even after its turn was settled as failed", () => {
+  // A watchdog settles the payment turn while the submit is still in flight.
+  const submitting = live("submitting");
+  const failed = reduceTurnSession(submitting, { type: "failed", label: "Submit timed out" });
+  assert.equal(failed?.stage, "error");
+  assert.notEqual(failed?.id, submitting.id, "the failure starts a new terminal session");
+
+  // A non-submitted stale result is still dropped (M1) ...
+  assert.equal(shouldSurfaceOutcome(failed, submitting.id, false), false);
+  // ... but a transaction that reached the network is never dropped (MAJOR-1).
+  assert.equal(shouldSurfaceOutcome(failed, submitting.id, true), true);
+  assert.equal(shouldSurfaceOutcome(null, submitting.id, true), true);
+  // The still-current case is unchanged either way.
+  assert.equal(shouldSurfaceOutcome(submitting, submitting.id, false), true);
+});
+
+test("a 90 s approval wait uses the approval ceiling, not the thinking one", () => {
+  // F1 gives the pending approval its own 140 s ceiling; the 30 s `thinking`
+  // watchdog no longer applies, so a human taking 90 s to authenticate cannot
+  // trip the notch (MAJOR-1, scenario "approval takes 90 s").
+  const approval = stageWatchdog("awaiting_approval");
+  assert.equal(approval?.timeoutMs, APPROVAL_WATCHDOG_MS);
+  assert.ok(approval !== null && approval.timeoutMs > 90_000);
+  assert.notEqual(approval.timeoutMs, THINKING_WATCHDOG_MS);
 });
