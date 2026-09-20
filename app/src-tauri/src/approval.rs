@@ -161,6 +161,13 @@ pub struct AuthorizedPayload {
     pub unsigned_xdr: String,
     pub summary: TxSummary,
     pub intent: Intent,
+    /// The signature hint (last four bytes) of the transaction's source key, read
+    /// from the fixed XDR offset by the bridge (W4b). It is optional and additive:
+    /// the gate releases XDR without decoding it, so an unknown or malformed
+    /// envelope simply carries `None` and the bridge falls back to a full
+    /// signature check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signer_hint: Option<Vec<u8>>,
 }
 
 /// Why a request could not be created.
@@ -569,6 +576,7 @@ impl ApprovalStore {
             unsigned_xdr: entry.request.unsigned_xdr.clone(),
             summary: entry.request.summary.clone(),
             intent: entry.request.intent.clone(),
+            signer_hint: signer_hint_of(&entry.request.unsigned_xdr),
         })
     }
 
@@ -698,13 +706,25 @@ impl ApprovalStore {
             return Err(TakeError::NotAuthorized { state: entry.state });
         }
         entry.state = ApprovalState::Consumed;
+        let signer_hint = signer_hint_of(&entry.request.unsigned_xdr);
         Ok(AuthorizedPayload {
             payload_hash: entry.request.payload_hash.clone(),
             unsigned_xdr: entry.request.unsigned_xdr.clone(),
             summary: entry.request.summary.clone(),
             intent: entry.request.intent.clone(),
+            signer_hint,
         })
     }
+}
+
+/// The signature hint (last four bytes) of an unsigned v1 transaction envelope's
+/// source key, read from the fixed offset the bridge uses (W4b). Best-effort:
+/// the gate is not the XDR validator, so anything unexpected yields `None` and
+/// the bridge falls back to its own full check.
+fn signer_hint_of(unsigned_xdr: &str) -> Option<Vec<u8>> {
+    let bytes = crate::bridge::verify::decode_envelope(unsigned_xdr).ok()?;
+    let parsed = crate::bridge::verify::parse_unsigned(&bytes).ok()?;
+    Some(parsed.source[28..32].to_vec())
 }
 
 impl Default for ApprovalStore {
