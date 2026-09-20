@@ -63,8 +63,10 @@ approval flow, never by hand. The tray icon is the bundled app icon
    Keep the label `panel-<name>` (the capability glob and the close handler
    depend on it) and set `route: "#/<name>"`. Update the allow-list test.
 2. **Route** (`app/src/panels/panelRoutes.ts`): add the name to `PanelName` and
-   `PANEL_NAMES`. `parsePanelRoute` then recognises `#/<name>`; unknown hashes
-   still fall back to the notch.
+   `PANEL_NAMES` — this is the frontend's **single source of truth**
+   (`@/lib/panels` re-exports the union, it must not redeclare it).
+   `parsePanelRoute` then recognises `#/<name>`; unknown hashes still fall back
+   to the notch.
 3. **Component** (`app/src/panels/<Name>Panel.tsx`): wrap the content in
    `PanelShell` (shared chrome) and use `Button` from
    `@/components/ui/button`. Wire it in `PanelRoot.tsx`.

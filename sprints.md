@@ -108,6 +108,7 @@
 - [x] Menu-bar tray (Wallet… / Settings… / Quit Polaris) using the bundled app icon; accessory activation policy unchanged (2026-09-20).
 - [x] `panel-*` capability (`capabilities/panels.json`); hash routing (`panelRoutes.ts`) + `PanelShell` + Wallet/Approval/Settings skeletons + `lib/panels.ts` wired to the existing event stream (2026-09-20).
 - [x] Tests: `parsePanelRoute` (app) + panel registry (Rust, no window); docs `docs/ui-panels.md` (2026-09-20).
+- [x] Independent-review corrections applied: UI promise rejections caught, single `PanelName` source, failed-`hide()` fallback, create-race collision focuses the existing window (+1 Rust test) (2026-09-20, report §8).
 - **Accept:** `npm run check` / `npm test -w @polaris/app` / `npm run build -w @polaris/app` / `cargo test` / `cargo clippy -D warnings` green. Tray icon, focusable windows and close-keeps-app-alive are **unverified** — need a human on a real Mac (`backlog/w0-panel-windows.md`).
 
 ## Milestone 2b — Minimal Integration Slice (chain lane first) 🔲

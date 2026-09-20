@@ -4,7 +4,7 @@
 - **Branch/worktree:** `feat/w0-panel-windows` in `.worktrees/w0-panels`
 - **Worker:** opencode worker (`opencode-go/deepseek-v4.1-flash`)
 - **Date:** 2026-09-20
-- **Status:** changes uncommitted in the worktree (coordinator commits); no PR opened
+- **Status:** on `feat/w0-panel-windows` (`6483025`, `b5a9a97`, `b2ce936`); the review corrections in §8 are applied but uncommitted in this worktree (coordinator commits); no PR opened
 
 ## 1. What was done
 
@@ -122,7 +122,7 @@ $ npm test -w @polaris/app
 ℹ tests 25   ℹ pass 25   ℹ fail 0        (was 19; +6 parsePanelRoute tests)
 
 $ npm run build -w @polaris/app
-✓ 763 modules transformed.
+✓ 764 modules transformed.
 ✓ built in 548ms
 
 $ cargo test --manifest-path app/src-tauri/Cargo.toml
@@ -179,3 +179,83 @@ work:
 ## 7. Blockers
 
 None.
+
+## 8. Review fixes
+
+Applied every MINOR and trivial NIT from `backlog/w0-panel-windows-review.md`
+(nothing in the review blocked merge). Public names are unchanged, so the other
+worktrees on this branch (`panels.rs` registry, `panelRoutes.ts`, `PanelShell`,
+`lib/panels.ts`) are unaffected.
+
+### What changed
+
+- **Unhandled promise rejections (MINOR)** — `panels/WalletPanel.tsx:39` and
+  `panels/PanelShell.tsx:33` now attach a `.catch` that logs a short
+  `console.warn` and never throws, matching the existing `App.tsx` /
+  `events.ts` / `polaris.ts` style. `void p` alone no longer leaves an
+  unhandled rejection if the IPC call fails.
+- **Duplicated `PanelName` unions (MINOR)** — `lib/panels.ts` now
+  `import type { PanelName }` from `panels/panelRoutes.ts` and re-exports it
+  (`export type { PanelName }`), so `panelRoutes.ts` is the single source of
+  truth. The local union in `lib/panels.ts` is gone; the public export name is
+  unchanged.
+- **Failed `hide()` cancelled the close (MINOR)** — `panels.rs::handle_window_event`
+  now calls `window.hide()` and only `api.prevent_close()` when it returned
+  `Ok`. If the window server fails, the close proceeds and the window is rebuilt
+  on the next open instead of leaving a visible, un-dismissable panel.
+- **Create race spurious window error (MINOR)** — `panels.rs::open_spec` now
+  matches the build error: a `WindowLabelAlreadyExists` /
+  `WebviewLabelAlreadyExists` collision means another caller (tray vs.
+  `open_panel`) built the same window first, so it focuses that window via the
+  new `show_and_focus` helper and returns `Ok` instead of `PanelError::Window`.
+  New pure test `a_label_collision_is_recognised_but_other_errors_are_not`.
+- **Doc nits (NIT)** — `docs/ui-panels.md` §4 step 2 now states that
+  `panelRoutes.ts` is the single source of truth and that `@/lib/panels`
+  re-exports the union (must not redeclare it). This report's stale status line
+  and module count were corrected (see §8.3 for the reproduced 764).
+
+### Files touched in this round
+
+- `app/src/panels/WalletPanel.tsx`, `app/src/panels/PanelShell.tsx`
+- `app/src/lib/panels.ts`, `app/src/panels/panelRoutes.ts` (comment only)
+- `app/src-tauri/src/panels.rs`
+- `docs/ui-panels.md`, `backlog/w0-panel-windows.md`, `backlog.md`, `sprints.md`
+
+### Verification (real output, re-run after the fixes)
+
+```
+$ npm run check
+  @polaris/interfaces / @polaris/agent / @polaris/stellar / @polaris/app
+  tsc -p tsconfig.json ................ clean (no diagnostics)
+
+$ npm test -w @polaris/app
+  ℹ tests 25   ℹ pass 25   ℹ fail 0
+
+$ npm run build -w @polaris/app
+  ✓ 764 modules transformed.
+  ✓ built in 188ms
+  (!) Some chunks are larger than 500 kB   # pre-existing, not introduced here
+
+$ cargo test --manifest-path app/src-tauri/Cargo.toml
+  test result: ok. 132 passed; 0 failed; 5 ignored; ... finished in 0.01s
+
+$ cargo clippy --manifest-path app/src-tauri/Cargo.toml --all-targets -- -D warnings
+  Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.60s   # clean
+```
+
+Rust went from 131 to 132 tests (+1: the label-collision test); the app suite is
+unchanged at 25 (the UI catches and the type de-duplication are not observable
+without a DOM/window, so no new frontend test was warranted).
+
+### Not verified (unchanged from §5)
+
+The tray icon, focusable windows, close-hides-not-quits and reusing the same
+instance are still human-only on a real Mac. The race fix and the hide-failure
+fallback are also only unit/structurally verified — they cannot be exercised in
+CI without real windows.
+
+### Blocked / handoff
+
+None. No files outside the W0 scope were touched.
+
+
