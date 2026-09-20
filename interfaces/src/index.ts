@@ -22,6 +22,12 @@ export type IntentKind =
   | "send"
   | "guard_policy"
   | "raw_tx";
+  | "swap"
+  | "send"
+  | "guard_policy"
+  | "raw_tx"
+  | "schedule_payment"
+  | "cancel_schedule";
 
 export interface Intent {
   kind: IntentKind;
@@ -36,6 +42,20 @@ export interface Intent {
   memo?: string;
   /** Voice transcript excerpt that produced it. */
   source?: string;
+  /**
+   * `schedule_payment` only. The wall-clock first run plus its **explicit**
+   * IANA zone — never the machine zone implicitly. The chain tool resolves these
+   * to UTC epoch seconds (`resolveLocalTime`) and shows local + UTC on the card.
+   */
+  firstRun?: { localDate: string; localTime: string; timeZone: string };
+  /** `schedule_payment` only. Fixed-second repeat; absent means one-shot. */
+  repeat?: { every: "day" | "week" | "custom"; customSeconds?: number };
+  /** `schedule_payment` only. Number of executions; required with `repeat`. */
+  runs?: number;
+  /** `cancel_schedule` only. An exact schedule id when the user named one. */
+  scheduleId?: number;
+  /** `cancel_schedule` only. How to pick among several schedules for one recipient. */
+  which?: "last" | "next";
 }
 
 /* ------------------------------------------------------------------ *

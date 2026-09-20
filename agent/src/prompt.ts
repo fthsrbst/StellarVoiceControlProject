@@ -34,6 +34,7 @@ export const POLARIS_SYSTEM_PROMPT = [
   '  example "Ahmet" or "ada"). Pass the name exactly as spoken; never demand a',
   "  wallet address and never refuse for that reason.",
   ...assetRules(),
+  ...scheduleRules(),
   "- If the command is not a wallet action, or is too ambiguous to act on",
   "  (missing amount or recipient, weather, general knowledge), call no tool and",
   "  reply with one short clarifying question in the user's language.",
@@ -54,6 +55,62 @@ export const POLARIS_SYSTEM_PROMPT = [
   '  for example "[en] Sure, what should I send?" or "[tr] Tamam, kime',
   '  gönderelim?". The tag is metadata; keep the rest natural.',
 ].join("\n");
+
+/**
+ * Schedule rules (W6b). The model resolves the relative wording ("tomorrow",
+ * "her cuma") into a concrete wall-clock date, and the zone stays the device's
+ * unless the user named one — the chain tool never guesses a zone silently.
+ */
+function scheduleRules(): string[] {
+  return [
+    "- Use schedule_payment for a future or repeating payment (\"tomorrow\",",
+    '  "her cuma"/"every Friday"), and cancel_schedule to cancel a scheduled one.',
+    "- For schedule_payment, resolve the user's words to a concrete local date and",
+    "  time and pass them as firstDate (YYYY-MM-DD) and firstTime (HH:mm).",
+    "  Omit timeZone unless the user named one; never invent a zone.",
+    "- A repeating payment needs a count: if the user said how often but not how",
+    '  many, ask "for how many?" and call no tool that turn.',
+  ];
+}
+
+/**
+ * Tells the model the current local date and time, so it can resolve
+ * "tomorrow"/"next Friday" into the explicit `firstDate`/`firstTime` the
+ * `schedule_payment` schema requires. The zone is the injected device zone.
+ */
+export function withClock(system: string, now: Date, timeZone?: string): string {
+  const zone = timeZone && timeZone.length > 0 ? timeZone : deviceTimeZone();
+  let formatted: string;
+  try {
+    formatted = new Intl.DateTimeFormat("en-GB", {
+      timeZone: zone,
+      weekday: "long",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(now);
+  } catch {
+    // An invalid injected zone must never break a turn; the clock line is a hint.
+    return system;
+  }
+  return [
+    system,
+    "",
+    `Right now it is ${formatted} (${zone}). Resolve today/tomorrow/weekday words against this.`,
+  ].join("\n");
+}
+
+/** The device's IANA zone, falling back to UTC when `Intl` cannot report one. */
+function deviceTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
 
 /**
  * Passes the recogniser-detected language to the model as a hint (step A12,

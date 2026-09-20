@@ -191,12 +191,18 @@ export async function executeApprovedIntent(
   const { depositTry, guardPolicy, sendPayment, swap, withdrawTry } = await import(
     "@polaris/stellar"
   );
+  const { depositTry, guardPolicy, sendPayment, swap } = await import("@polaris/stellar");
+  // W6b: the schedule tools live in their own module (RPC + guard client wiring);
+  // both adapt a validated `Intent` to the chain tool's unsigned XDR + summary.
+  const { cancelChainTool, scheduleChainTool } = await import("@/lib/schedulesLive");
   const chainTools = {
     send: sendPayment,
     swap,
     guard_policy: guardPolicy,
     deposit: depositTry,
     withdraw: withdrawTry,
+    schedule_payment: scheduleChainTool,
+    cancel_schedule: cancelChainTool,
   } as const;
   // F1: `deps.onStage` (when supplied) threads the turn's stage reports through
   // both the approval gate and the sign/submit path.

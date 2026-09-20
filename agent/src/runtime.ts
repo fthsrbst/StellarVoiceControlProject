@@ -18,10 +18,12 @@ import { AnthropicLlm } from "./llm/anthropic.ts";
 import { OpenAiCompatibleLlm } from "./llm/openai.ts";
 import { depositTool, withdrawTool } from "./tools/anchor.ts";
 import { sendPaymentTool } from "./tools/payment.ts";
+import { cancelScheduleTool, schedulePaymentTool } from "./tools/schedule.ts";
 import { createToolRegistry, type ToolRegistry } from "./tools/registry.ts";
 
 /**
  * The production tool set: the real intent tools and nothing else.
+ * The production tool set: the value-moving intent tools and nothing else.
  *
  * Step A5 trimmed the `noop` round-trip probe out of the default registry. Every
  * registered tool is serialised into **every** model request, and `noop` was a
@@ -29,12 +31,16 @@ import { createToolRegistry, type ToolRegistry } from "./tools/registry.ts";
  * exported and used by `demo.ts` and the loop tests. W5b adds `deposit` and
  * `withdraw` for the anchor on/off-ramp; they validate into an `Intent` exactly
  * like `send_payment` and never touch the chain here.
+ * exported and used by `demo.ts` and the loop tests. W6b adds the two schedule
+ * tools; all three stop at a validated `Intent` (never executed in the turn).
  */
 export function createDefaultRegistry(): ToolRegistry {
   return createToolRegistry()
     .register(sendPaymentTool)
     .register(depositTool)
     .register(withdrawTool);
+    .register(schedulePaymentTool)
+    .register(cancelScheduleTool);
 }
 
 export interface AgentRuntime {

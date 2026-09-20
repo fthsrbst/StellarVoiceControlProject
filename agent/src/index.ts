@@ -50,6 +50,7 @@ export {
   type AccountRef,
   type AliasMap,
 } from "./accountRefs.ts";
+export { POLARIS_SYSTEM_PROMPT, withClock, withDetectedLanguage } from "./prompt.ts";
 export {
   ASSET_SYNONYMS,
   DEFAULT_ASSET,
@@ -137,3 +138,13 @@ export {
   type DepositInput,
   type WithdrawInput,
 } from "./tools/anchor.ts";
+  cancelScheduleTool,
+  isValidTimeZone,
+  normalizeRepeat,
+  normalizeWhich,
+  parseCancelSchedule,
+  parseSchedulePayment,
+  schedulePaymentTool,
+  type CancelScheduleInput,
+  type SchedulePaymentInput,
+} from "./tools/schedule.ts";
