@@ -1,82 +1,98 @@
 /**
- * Rules / Policies page — the user's spending rulesets.
+ * Rules page — a read-only summary of the owner's on-chain guard rules.
  *
- * Cards follow the guard's vocabulary: condition → action → approval profile
- * (`none` / `touch_id` / `always_ask`, from the approval layer). Toggles and
- * the "add rule" row are local mock state; a real `set_rule` flow (with the
- * approval card from `backlog/approval-policy.md`) replaces them later.
+ * The rows use the Security panel's exact read-back wording (`stateLines`):
+ * profile, executor, limits, recipients, allowance, spent-today and the alias
+ * book size. Nothing is editable here — "Edit rules" opens the Security panel,
+ * where every change goes through the shared tx pipeline (approval card →
+ * Touch ID → Freighter). Reads come from `useRulesData`; a browser preview
+ * shows the labelled mock demo, and a failed read shows an error with Retry.
  */
-import { useState } from "react";
-import { Fingerprint, Plus, ShieldCheck } from "lucide-react";
+import { CircleAlert, PenLine, RefreshCw, ShieldCheck } from "lucide-react";
 
-import {
-  MOCK_RULES,
-  type ApprovalRequirement,
-  type GuardRule,
-} from "@/lib/mockData";
-
-const APPROVAL_LABEL: Record<ApprovalRequirement, string> = {
-  none: "no approval",
-  touch_id: "Touch ID",
-  always_ask: "always ask",
-};
+import { openPanel } from "@/lib/panels";
+import { useRulesData } from "@/notch/data/useRulesData";
 
 export function RulesPage() {
-  const [rules, setRules] = useState<GuardRule[]>(MOCK_RULES);
+  const { state, lines, detail, demo, refresh } = useRulesData();
 
-  const toggle = (id: string): void => {
-    setRules((current) =>
-      current.map((rule) =>
-        rule.id === id ? { ...rule, enabled: !rule.enabled } : rule,
-      ),
-    );
+  const editRules = (): void => {
+    // Ignore the rejection outside Tauri (the demo preview has no panel windows).
+    void openPanel("security").catch(() => {});
   };
 
   return (
     <div className="page-stack">
-      <ul className="page-list rule-list">
-        {rules.map((rule) => (
-          <li key={rule.id} className={`rule-card${rule.enabled ? "" : " is-disabled"}`}>
-            <div className="rule-head">
-              <ShieldCheck className="rule-icon" aria-hidden="true" />
-              <span className="rule-name">{rule.name}</span>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={rule.enabled}
-                aria-label={`${rule.enabled ? "Disable" : "Enable"} rule: ${rule.name}`}
-                className={`page-toggle${rule.enabled ? " is-on" : ""}`}
-                onClick={() => toggle(rule.id)}
-              >
-                <span className="page-toggle-knob" />
-              </button>
-            </div>
-            <p className="rule-body">
-              <span className="rule-condition">{rule.condition}</span>
-              <span className="rule-arrow" aria-hidden="true">
-                →
-              </span>
-              <span className="rule-action">{rule.action}</span>
-            </p>
-            <p className="rule-approval">
-              <Fingerprint aria-hidden="true" />
-              Approval: {APPROVAL_LABEL[rule.approval]}
-            </p>
-          </li>
-        ))}
-      </ul>
-      {/* Mock affordance: the real flow is a voice-drafted rule reviewed on an
-          approval card before `set_rule` touches the chain. */}
-      <button
-        type="button"
-        className="rule-add"
-        onClick={() => {
-          /* Mock-only affordance: rule creation is a guarded flow, not a form. */
-        }}
-      >
-        <Plus aria-hidden="true" />
-        Add rule — coming with guard wiring
+      {state === "loading" ? (
+        <p className="rule-condition">Reading spending rules…</p>
+      ) : null}
+
+      {state === "unconfigured" ? (
+        <StateCard title="Guard not configured" detail={detail} />
+      ) : null}
+
+      {state === "not_set_up" ? (
+        <StateCard
+          title="No spending rule yet"
+          detail="Publish the Always-ask baseline in the Security panel to start."
+        />
+      ) : null}
+
+      {state === "error" ? (
+        <div className="rule-card">
+          <div className="rule-head">
+            <CircleAlert className="rule-icon" aria-hidden="true" />
+            <span className="rule-name">Could not read the rules</span>
+          </div>
+          <p className="rule-body">
+            <span className="rule-condition">{detail}</span>
+          </p>
+          <button type="button" className="rule-add" onClick={refresh}>
+            <RefreshCw aria-hidden="true" />
+            Retry
+          </button>
+        </div>
+      ) : null}
+
+      {state === "ready" ? (
+        <>
+          {demo ? (
+            <p className="rule-condition">Demo data — connect a wallet to read the real rules.</p>
+          ) : null}
+          <ul className="page-list rule-list">
+            {lines.map((line) => (
+              <li key={line.label} className="rule-card">
+                <div className="rule-head">
+                  <span className="rule-name">{line.label}</span>
+                  <span className="rule-action">{line.value}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+
+      <button type="button" className="rule-add" onClick={editRules}>
+        <PenLine aria-hidden="true" />
+        Edit rules in Security
       </button>
+    </div>
+  );
+}
+
+/** A non-ready state: a title plus the one-line reason. */
+function StateCard({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="rule-card">
+      <div className="rule-head">
+        <ShieldCheck className="rule-icon" aria-hidden="true" />
+        <span className="rule-name">{title}</span>
+      </div>
+      {detail ? (
+        <p className="rule-body">
+          <span className="rule-condition">{detail}</span>
+        </p>
+      ) : null}
     </div>
   );
 }

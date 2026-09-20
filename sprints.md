@@ -231,6 +231,7 @@
 - [x] (2026-09-20, `integration/wallet`) **MERGE-FIX3.** Merged the reviewed `feat/w5a-anchor-signing` and `feat/w5b-anchor-flows` fix branches into integration, resolving the `verify.rs` (panic-free parser + `SourceMismatch`) and `chain.ts` (W6b schedules + W5b `runAnchorIntent`) conflicts; all checks/tests/build/cargo test/clippy green — `backlog/merge-fix-integration.md`
 - [x] (2026-09-20, `integration/wallet`) **MERGE-MAIN.** Merged Fatih's notch shell (origin/main #23/#24) into the pipeline branch: one App bridge over our turn session + his shell machine, typed prompt through `executeApprovedIntent`, debug check ported to `getShellGeometry`, `window_size` BUG-1 fix; all checks/tests/build/clippy green — `backlog/merge-main-notch-shell.md`
 - [x] (2026-09-20, W6a-fix) Review fixes: per-step resequencing in `runTxSequence` (B1), mode-driven plan (M2), alias union + read-failed (M3), honest wording + double-click guard (N4–N8) — `backlog/w6a-security-panel.md`
+- [x] (2026-09-20, branch `feat/nw2-rules-page`) **NW2.** Notch Rules page reads the real guard rules (read-only summary via `useRulesData` + pure `mapRulesView`), "Edit rules" opens the Security panel; app check/tests (299/0)/build green — `backlog/nw-rules.md`
 - [ ] **T6.** Demo runbook completed after T1/T2/T5 (`docs/demo-runbook.md`)
 
 ## Milestone 4 — Delivery / Presentation 🔲

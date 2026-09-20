@@ -31,3 +31,15 @@ Notes:
 transaction". A pure `deriveWalletPageView` picks the state (loading / unconfigured / offline /
 unfunded + Friendbot / ready) so the page renders only real data or an honest error; there is
 deliberately no mock fallback. Reads are read-only, load on mount and refresh on demand (no polling).
+## Rules page (NW2)
+
+`notch/pages/RulesPage.tsx` now renders `notch/data/useRulesData.ts`. The hook
+does one read on mount (re-run by the error state's Retry, no polling) and the
+pure `mapRulesView(load)` turns `loadSecurityState()` into the page's view model:
+the same `stateLines` read-back the Security panel shows (profile, executor,
+limits, recipients, allowance, spent-today) plus a `Saved contacts` line from the
+alias book. States: `unconfigured` ("Guard not configured"), `not_set_up` (rule
+`null`), `error` + Retry (`unreachable`); a real read failure never falls back to
+mock. Outside Tauri, or when `stellar_config` has no owner, the page shows the
+labelled mock demo. The page is read-only — its only action is "Edit rules in
+Security", which calls `openPanel("security")`.
