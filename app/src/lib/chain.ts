@@ -138,6 +138,12 @@ async function ensurePaymentsConfigured(): Promise<void> {
         networkPassphrase: config.networkPassphrase,
       }),
     );
+    // The anchor tools (`depositTry` / `withdrawTry`) need a session with the
+    // shell signer. `createAnchorSigner` routes sequence-0 challenges to the
+    // wallet-only Rust command and everything else to the Touch ID pipeline.
+    const { anchor } = await import("@polaris/stellar");
+    const { createAnchorSigner } = await import("@/lib/anchor");
+    anchor.configureAnchor({ signer: createAnchorSigner() });
     configured = true;
   })();
   try {
@@ -182,12 +188,15 @@ export async function executeApprovedIntent(
       detail,
     };
   }
-  const { depositTry, guardPolicy, sendPayment, swap } = await import("@polaris/stellar");
+  const { depositTry, guardPolicy, sendPayment, swap, withdrawTry } = await import(
+    "@polaris/stellar"
+  );
   const chainTools = {
     send: sendPayment,
     swap,
     guard_policy: guardPolicy,
     deposit: depositTry,
+    withdraw: withdrawTry,
   } as const;
   // F1: `deps.onStage` (when supplied) threads the turn's stage reports through
   // both the approval gate and the sign/submit path.

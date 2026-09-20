@@ -127,3 +127,13 @@ export {
   sendPaymentTool,
   type SendPaymentInput,
 } from "./tools/payment.ts";
+export {
+  depositTool,
+  FIAT_CODE,
+  normalizeFiat,
+  parseDeposit,
+  parseWithdraw,
+  withdrawTool,
+  type DepositInput,
+  type WithdrawInput,
+} from "./tools/anchor.ts";
