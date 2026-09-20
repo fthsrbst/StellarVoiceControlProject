@@ -748,7 +748,9 @@ impl ApprovalStore {
 fn signer_hint_of(unsigned_xdr: &str) -> Option<Vec<u8>> {
     let bytes = crate::bridge::verify::decode_envelope(unsigned_xdr).ok()?;
     let parsed = crate::bridge::verify::parse_unsigned(&bytes).ok()?;
-    Some(parsed.source[28..32].to_vec())
+    // `source` is always 32 bytes, but a `get` keeps this fallible like every
+    // other envelope slice: no input may panic here.
+    Some(parsed.source.get(28..32)?.to_vec())
 }
 
 impl Default for ApprovalStore {
@@ -1467,5 +1469,19 @@ mod tests {
             ApprovalErrorKind::NotPending
         );
         assert_eq!(kind(DenyError::Expired.into()), ApprovalErrorKind::Expired);
+    }
+
+    #[test]
+    fn signer_hint_of_never_panics_on_hostile_xdr() {
+        // The reviewer's crafted envelope panicked inside `parse_unsigned` before
+        // the fix; this path is reached whenever the gate releases a payload.
+        const POC: &str = "AAAAAgAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgICAgAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEBAQ==";
+        assert_eq!(signer_hint_of(POC), None);
+        assert_eq!(signer_hint_of("not base64 !!!"), None);
+        assert_eq!(signer_hint_of(""), None);
+        // Prefixes of a realistic envelope must be clean `None`s, never panics.
+        for cut in 0..XDR_REAL.len().min(96) {
+            let _ = signer_hint_of(&XDR_REAL[..cut]);
+        }
     }
 }

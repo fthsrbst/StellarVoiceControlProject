@@ -1094,4 +1094,27 @@ mod tests {
         let outcome = context.run();
         assert!(!outcome.ok);
     }
+
+    /// The reviewer's crafted 200-char envelope (see `verify`), which reached
+    /// `validate_challenge_xdr` through `bridge_sign_challenge` and panicked.
+    const CRAFTED_POC_BASE64: &str = "AAAAAgAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgICAgAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEBAQ==";
+
+    #[test]
+    fn challenge_validation_refuses_the_crafted_poc_without_panicking() {
+        let outcome = validate_challenge_xdr(CRAFTED_POC_BASE64, CHALLENGE_OWNER_ADDRESS)
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(outcome.code.as_deref(), Some("integrity"));
+    }
+
+    #[test]
+    fn challenge_validation_never_panics_on_truncated_or_garbage_input() {
+        // Every base64 prefix of the valid challenge, plus garbage and the PoC.
+        for cut in 0..CHALLENGE_XDR.len().min(200) {
+            let _ = validate_challenge_xdr(&CHALLENGE_XDR[..cut], CHALLENGE_OWNER_ADDRESS);
+        }
+        for garbage in ["", "####", "AAAA", CRAFTED_POC_BASE64, &"A".repeat(300)] {
+            let _ = validate_challenge_xdr(garbage, CHALLENGE_OWNER_ADDRESS);
+        }
+    }
 }
