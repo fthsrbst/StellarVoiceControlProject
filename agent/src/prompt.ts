@@ -1,60 +1,23 @@
 /**
- * The Polaris system prompt (step A2, trimmed in step A5).
+ * The Polaris system prompt (step A2; composed from data in F2).
  *
- * It is provider-independent on purpose: the same text is handed to OpenCode
- * Zen Go, Groq or OpenRouter, so swapping providers never changes the product
- * behaviour. The rules were tuned against the live model: a permissive prompt
- * ("Ahmet could be anyone") makes the model refuse and ask for a wallet address,
- * while this one treats address-book names as valid recipients and still
- * declines off-topic or ambiguous input.
- *
- * Step A5 trimmed the wording to the rules that actually change behaviour: the
- * prompt and the tool schemas are sent on every turn, so every unnecessary token
- * is paid for on every spoken command. The same six rules are kept — see the A5
- * report for the measured effect.
- *
- * Step A13 adds the asset rule from `assets.ts`: the model must be told which
- * assets exist, or it guesses (`"send 400 dollar"` became `asset: "USD"`). The
- * wording is generated from the single list, so it stays true if the list grows.
+ * The text itself now lives in `capabilities.ts`, which builds it from the tool
+ * registry, the account table and a few-shot block. This module keeps the two
+ * pieces the rest of the agent already depends on: the default prompt (used by
+ * the CLI/demo/eval, where no config is injected) and the STT language hint.
  */
-import {
-  DEFAULT_ASSET,
-  describeAssetSynonyms,
-  describeSupportedAssets,
-  SUPPORTED_ASSETS,
-} from "./assets.ts";
+import { buildSystemPrompt } from "./capabilities.ts";
+import { createDefaultRegistry } from "./runtime.ts";
 
-export const POLARIS_SYSTEM_PROMPT = [
-  "You are Polaris, a push-to-talk Stellar wallet assistant. You receive one",
-  "short spoken command, in Turkish or English, and reply with at most one tool",
-  "call.",
-  "",
-  "Rules:",
-  "- Use send_payment for payment or transfer requests.",
-  "- Recipients may be names or aliases from the user's address book (for",
-  '  example "Ahmet" or "ada"). Pass the name exactly as spoken; never demand a',
-  "  wallet address and never refuse for that reason.",
-  ...assetRules(),
-  "- If the command is not a wallet action, or is too ambiguous to act on",
-  "  (missing amount or recipient, weather, general knowledge), call no tool and",
-  "  reply with one short clarifying question in the user's language.",
-  "- Never invent an amount, asset or recipient the user did not say, and never",
-  "  mention that you are an AI model.",
-  "",
-  "Answers are spoken aloud, so keep them tiny:",
-  "- One or two short sentences at most. A confirmation is about 40 characters.",
-  "- Never explain your reasoning, list options, repeat the command, or add",
-  "  caveats. Anything longer is cut off before it is spoken.",
-  "",
-  "Language (always):",
-  "- Reply in the SAME language the user just spoke: Turkish for Turkish,",
-  "  English for English. Never switch language.",
-  "- Every tool call must include a `language` field: the user's language as a",
-  '  BCP-47 base code, either "tr" or "en".',
-  "- A reply with no tool call must begin with that same tag in square brackets,",
-  '  for example "[en] Sure, what should I send?" or "[tr] Tamam, kime',
-  '  gönderelim?". The tag is metadata; keep the rest natural.',
-].join("\n");
+/**
+ * The default prompt: the built-in tools with label-only accounts. The desktop
+ * app replaces it with `buildSystemPrompt` fed by `stellar_config`, so the owner
+ * and the real aliases reach the model; this constant keeps every non-app entry
+ * point (CLI, demo, bench, eval) working with the same behaviour.
+ */
+export const POLARIS_SYSTEM_PROMPT = buildSystemPrompt({
+  tools: createDefaultRegistry().definitions(),
+});
 
 /**
  * Passes the recogniser-detected language to the model as a hint (step A12,
@@ -79,19 +42,4 @@ export function withDetectedLanguage(system: string, language?: string): string 
       ` transcript text instead, and set the language field/tag to the language the` +
       ` text is actually written in.`,
   ].join("\n");
-}
-
-/**
- * The asset rule, generated from `assets.ts` so the prompt and the validator
- * can never disagree (step A13). Stays grammatical as the list grows: "the
- * supported asset is USDC" vs "the supported assets are USDC and XLM".
- */
-function assetRules(): string[] {
-  const noun = SUPPORTED_ASSETS.length === 1 ? "asset is" : "assets are";
-  return [
-    `- On Stellar testnet the supported ${noun} ${describeSupportedAssets()} — never`,
-    "  output any other asset code.",
-    `- Money words such as ${describeAssetSynonyms()} mean ${DEFAULT_ASSET}; when the`,
-    `  user names no asset, omit \`asset\` and it defaults to ${DEFAULT_ASSET}.`,
-  ];
 }

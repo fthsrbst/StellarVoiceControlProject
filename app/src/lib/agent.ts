@@ -11,16 +11,21 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import {
+  AccountRefLlm,
   AnthropicLlm,
+  buildSystemPrompt,
   createDefaultRegistry,
   createEventBus,
   OpenAiCompatibleLlm,
   runTurn,
   toAgentError,
   type AgentProvider,
+  type AliasMap,
 } from "@polaris/agent";
 import type { AgentStage, Intent } from "@polaris/interfaces";
 import { markTurnPhase } from "@/lib/polaris";
+import { getStellarConfig } from "@/lib/stellarConfig";
+import committedAliases from "../../../stellar/config/aliases.json";
 
 /**
  * Logical transport label, only ever used in error copy. The real provider root
@@ -126,6 +131,51 @@ const llm =
         fetchImpl: tauriAgentFetch,
       });
 
+/**
+ * Non-secret chain config for the prompt (step F2): the owner address and the
+ * alias book. Committed aliases are the base; `POLARIS_ALIASES` (from
+ * `stellar_config`) wins, exactly as `chain.ts` resolves them for the chain
+ * tool. Read once and memoised; a failed read (no Tauri, no config) falls back
+ * to label-only accounts so a turn still works.
+ */
+interface PromptAccounts {
+  ownerAddress: string | null;
+  aliases: AliasMap;
+}
+
+const committedAliasAddresses: AliasMap = Object.fromEntries(
+  Object.entries(committedAliases as Record<string, { address: string }>).map(([name, entry]) => [
+    name,
+    entry.address,
+  ]),
+);
+
+let accountsPromise: Promise<PromptAccounts> | undefined;
+
+function loadPromptAccounts(): Promise<PromptAccounts> {
+  accountsPromise ??= getStellarConfig()
+    .then((config) => ({
+      ownerAddress: config.ownerAddress,
+      aliases: { ...committedAliasAddresses, ...config.aliases },
+    }))
+    .catch(() => ({ ownerAddress: null, aliases: committedAliasAddresses }));
+  return accountsPromise;
+}
+
+let systemPromptPromise: Promise<string> | undefined;
+
+/** Builds the F2 prompt from the live tool registry + config, once. */
+function loadSystemPrompt(accounts: PromptAccounts): Promise<string> {
+  systemPromptPromise ??= Promise.resolve(
+    buildSystemPrompt({
+      tools: registry.definitions(),
+      ownerAddress: accounts.ownerAddress,
+      aliases: accounts.aliases,
+    }),
+  );
+  return systemPromptPromise;
+}
+
 /** Per-turn observation hooks. Used by the shell to drive the honest stage. */
 export interface AgentTurnHooks {
   /**
@@ -162,11 +212,17 @@ export async function runAgentTurn(
     : undefined;
   const started = performance.now();
   try {
+    // F2: the prompt names the owner and the real aliases, and account phrases
+    // ("wallet 2", "ek 2") are normalised before the model sees the transcript.
+    const accounts = await loadPromptAccounts();
+    const system = await loadSystemPrompt(accounts);
     const result = await runTurn({
       transcript,
       registry,
-      llm,
+      llm: new AccountRefLlm(llm, accounts.aliases),
       bus,
+      system,
+      toolContext: { aliases: { ...accounts.aliases } },
       ...(transcriptLanguage ? { transcriptLanguage } : {}),
     });
     // A11: the provider response has been parsed into a turn result by now.

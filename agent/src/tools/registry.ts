@@ -10,6 +10,12 @@ export interface ToolContext {
   transcript: string;
   /** Testnet-only in this project (see docs/architecture.md §1 "Non-goals"). */
   network: "testnet";
+  /**
+   * Known recipient aliases (canonical name -> `G...` address), supplied by the
+   * shell (step F2). Validation uses them to accept a recipient the model
+   * returned as "wallet 2" or "hesap 2" by resolving it to `acc2`.
+   */
+  aliases?: Record<string, string>;
 }
 
 /**
