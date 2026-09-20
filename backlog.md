@@ -23,6 +23,7 @@
 | 2026-09-20 | **W4a — Freighter signing bridge page** (Stellar Wallets Kit): `/sign` second Vite entry, pure state machine, fail-closed address/network checks, signed-vs-unsigned hash binding, local fixture + tests, protocol docs; review fixes 2 applied | opencode worker (deepseek-v4.1-flash) | in review (fixes applied) | `backlog/w4a-freighter-bridge-page.md` | P0 |
 | 2026-09-20 | **W4b-2 — wiring (TS)**: Touch ID approver, `bridge_sign`→`submitSignedTx`→`tx_submitted` path, enriched outcome + tr/en spoken result, Rust `tx_submitted_emit` command + validation, W4 Debug checks (`network`/`approval`/`bridge`/`submit`); needs W4b-1 Rust merged + a human to observe live | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/w4b-wiring.md` | P0 |
 | 2026-09-20 | **W4b-1 — Rust bridge server + independent signature verification**: one-shot loopback `tiny_http` session (one-time token, TTL, const-time compare, Host/Origin/CSP caps), `bridge_sign`/`bridge_selftest`/`bridge_health`, parse-free XDR verification + in-repo StrKey, browser launcher; real browser + Freighter round trip still needs a human | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/w4b-bridge-server.md` | P0 |
+| 2026-09-20 | **W0d — shared panel tx pipeline**: `app/src/lib/txPipeline.ts` (`runTx`/`runTxSequence`, injectable deps, never throws) + `useTxRun.ts` hook, reuse the Touch ID approver/`signAndSubmit`; fake-based tests; docs §10 | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/w0d-tx-pipeline.md` | P1 |
 
 ## Completed Tasks (Archive)
 

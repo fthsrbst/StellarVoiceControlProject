@@ -257,3 +257,27 @@ alias, Horizon balance), `approval.ts` (`biometric_health` + a “Test Touch ID�
 action), `bridge.ts` (`bridge_health` + a “Test Freighter signing (no funds)”
 action that builds an owner→owner 1 XLM payment with sequence 0), `submit.ts`
 (static importability only).
+
+## 10. Running a transaction from a panel
+
+> Step W0d. A panel that builds its own unsigned XDR (Security, Schedules, P2P,
+> Anchor) pushes it through the **same** approve → sign → submit pipeline the
+> voice payment uses, via `app/src/lib/txPipeline.ts`. A panel never signs, never
+> handles a secret, and never bypasses the gate.
+
+- `runTx(result, { intent, label })` — takes a `ChainToolResult` from a
+  `@polaris/stellar` builder, computes the digest (`xdrDigest`, exactly as the
+  seam does), asks the Touch ID approver, then calls `signAndSubmit`. It never
+  throws: it resolves to `{ status: "submitted", txHash, explorerUrl }` or a
+  fail-closed `{ status: "denied" | "failed", label, detail }`. Deny, expiry,
+  timeout, a throwing approver and sign/submit failures are all labelled outcomes.
+- `runTxSequence(steps, deps?, onProgress?)` — runs steps strictly in order,
+  stops at the first non-submitted outcome, and reports
+  `(index, total, label, phase)` so the panel can show which step is running.
+- `useTxRun()` (`app/src/lib/useTxRun.ts`) — the React hook for a panel:
+  `{ state: idle|running|done, progress, outcomes, run(steps), reset() }`.
+- Deps (approver, signer, clock) are injectable; the defaults lazily compose the
+  real `createTouchIdApprover` and `signAndSubmit`, so no Tauri code loads until a
+  panel actually runs a transaction. `docs/ui-panels.md` rules still hold: the
+  digest is the XDR digest, not the tx hash; `POLARIS_ALLOW_AUTO_APPROVE` stays
+  off; a denial is final.
