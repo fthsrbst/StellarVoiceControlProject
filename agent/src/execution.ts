@@ -82,7 +82,8 @@
  * `depositTry` is **not** a stub (M8): with no anchor configured it throws a
  * plain error (reported as `"failed"` / `Chain error`), and with one configured
  * it builds the unsigned trustline or SEP-10 login XDR (reported as `"executed"`).
- * It never submits, so nothing reaches the network from here.
+ * It never submits, so nothing reaches the network from here. W5b adds the
+ * `withdraw` kind, dispatched to `withdrawTry` the same way.
  */
 import type { ChainTool, ChainToolResult, Intent, IntentKind } from "@polaris/interfaces";
 

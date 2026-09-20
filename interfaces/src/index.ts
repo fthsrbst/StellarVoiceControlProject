@@ -15,7 +15,13 @@
  * 1. Intent — structured value-moving request
  * ------------------------------------------------------------------ */
 
-export type IntentKind = "deposit" | "swap" | "send" | "guard_policy" | "raw_tx";
+export type IntentKind =
+  | "deposit"
+  | "withdraw"
+  | "swap"
+  | "send"
+  | "guard_policy"
+  | "raw_tx";
 
 export interface Intent {
   kind: IntentKind;
