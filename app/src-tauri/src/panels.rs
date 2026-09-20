@@ -1,0 +1,290 @@
+//! Interactive panel windows (step W0).
+//!
+//! The notch overlay (`notch.rs`) is transparent, click-through and cannot take
+//! focus, so it can never host a real interaction. Wallet, approval and settings
+//! therefore live in ordinary windows, created on demand and reused afterwards.
+//!
+//! This module is the single source of truth for those windows: a fixed
+//! allow-list of [`PanelSpec`]s, one webview per panel label, and the close
+//! handling that keeps a panel from taking the whole app down. The frontend
+//! teammate adds a panel by adding a registry entry here, a route in
+//! `app/src/panels/panelRoutes.ts` and a component under `app/src/panels/` — no
+//! other Rust change is needed (`docs/ui-panels.md`).
+
+use serde::Serialize;
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+
+/// Stable names accepted by [`open`] and the `open_panel` command. These are the
+/// only panels that exist; anything else is rejected.
+pub const WALLET: &str = "wallet";
+pub const APPROVAL: &str = "approval";
+pub const SETTINGS: &str = "settings";
+
+/// Window labels are namespaced so the capability glob (`panel-*`) and the close
+/// handler can both recognise a panel without enumerating labels at every site.
+const LABEL_PREFIX: &str = "panel-";
+
+/// Geometry and behaviour of one panel window.
+///
+/// `route` is the hash the webview opens on, so one `index.html` serves the
+/// overlay and every panel; `app/src/main.tsx` picks the component from the
+/// hash. Keep `route` in step with `parsePanelRoute` in the frontend.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PanelSpec {
+    /// Name callers use (`open_panel` payload, tray menu).
+    pub name: &'static str,
+    /// Tauri window label. One window per label, reused across opens.
+    pub label: &'static str,
+    /// Window title, also exposed to assistive tech.
+    pub title: &'static str,
+    /// Hash route appended to `index.html` (e.g. `#/wallet`).
+    pub route: &'static str,
+    pub width: f64,
+    pub height: f64,
+    /// The approval card sits above other windows; the rest are ordinary.
+    pub always_on_top: bool,
+    pub resizable: bool,
+}
+
+/// The allow-list, in presentation order.
+pub const PANELS: &[PanelSpec] = &[
+    PanelSpec {
+        name: WALLET,
+        label: "panel-wallet",
+        title: "Polaris Wallet",
+        route: "#/wallet",
+        width: 420.0,
+        height: 600.0,
+        always_on_top: false,
+        resizable: true,
+    },
+    PanelSpec {
+        name: APPROVAL,
+        label: "panel-approval",
+        title: "Polaris Approval",
+        route: "#/approval",
+        width: 440.0,
+        height: 520.0,
+        always_on_top: true,
+        resizable: false,
+    },
+    PanelSpec {
+        name: SETTINGS,
+        label: "panel-settings",
+        title: "Polaris Settings",
+        route: "#/settings",
+        width: 520.0,
+        height: 600.0,
+        always_on_top: false,
+        resizable: true,
+    },
+];
+
+/// Why a panel could not be opened.
+///
+/// Serialized straight back to the webview, so the variants are part of the
+/// UI contract: `unknownPanel` is a caller bug, `window` is the OS refusing the
+/// window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PanelError {
+    /// The requested name is not on the allow-list.
+    UnknownPanel { name: String },
+    /// The OS could not create, show or focus the window.
+    Window { message: String },
+}
+
+impl std::fmt::Display for PanelError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnknownPanel { name } => write!(f, "unknown panel: {name}"),
+            Self::Window { message } => write!(f, "panel window error: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for PanelError {}
+
+/// Looks up a panel in the allow-list. This is the whole gate: a name that is
+/// not in [`PANELS`] cannot reach the window builder.
+pub fn resolve(name: &str) -> Result<&'static PanelSpec, PanelError> {
+    PANELS
+        .iter()
+        .find(|panel| panel.name == name)
+        .ok_or_else(|| PanelError::UnknownPanel {
+            name: name.to_string(),
+        })
+}
+
+/// True for any window label this module owns. The close handler uses it so a
+/// panel's close button hides the panel instead of quitting the app.
+pub fn is_panel_label(label: &str) -> bool {
+    label.starts_with(LABEL_PREFIX) && PANELS.iter().any(|panel| panel.label == label)
+}
+
+/// The `index.html` URL for a panel, with the route in the hash so the React
+/// router (`app/src/main.tsx`) can choose the component.
+fn panel_url(spec: &PanelSpec) -> String {
+    format!("index.html{}", spec.route)
+}
+
+/// Opens a panel by name, or focuses the one that is already open.
+pub fn open(app: &AppHandle, name: &str) -> Result<(), PanelError> {
+    open_spec(app, resolve(name)?)
+}
+
+/// Opens a spec directly — the shared helper the command, the tray and any
+/// future Rust caller go through.
+///
+/// One instance per label: the first call builds the window; later calls only
+/// show and focus it, so panel state survives a close. Close does not destroy
+/// the window (see [`handle_window_event`]), which is what makes the reuse
+/// actually preserve state.
+pub fn open_spec(app: &AppHandle, spec: &PanelSpec) -> Result<(), PanelError> {
+    if let Some(window) = app.get_webview_window(spec.label) {
+        window.show().map_err(window_error)?;
+        window.set_focus().map_err(window_error)?;
+        return Ok(());
+    }
+
+    let window = WebviewWindowBuilder::new(app, spec.label, WebviewUrl::App(panel_url(spec).into()))
+        .title(spec.title)
+        .inner_size(spec.width, spec.height)
+        .resizable(spec.resizable)
+        .always_on_top(spec.always_on_top)
+        .center()
+        // Build hidden, then show: a window that appears mid-layout flashes at
+        // the wrong size before its webview has painted.
+        .visible(false)
+        .build()
+        .map_err(window_error)?;
+    window.show().map_err(window_error)?;
+    window.set_focus().map_err(window_error)?;
+    Ok(())
+}
+
+/// Hides a panel instead of destroying it when its close button is pressed.
+///
+/// The overlay's `main` window is never closed, so the app would not exit
+/// anyway; hiding keeps the panel's webview (and its state) alive for the next
+/// open, and gives the close button the "dismiss" semantics a panel wants.
+pub fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        if is_panel_label(window.label()) {
+            let _ = window.hide();
+            api.prevent_close();
+        }
+    }
+}
+
+/// Maps a Tauri window error to the serializable [`PanelError`].
+fn window_error(error: tauri::Error) -> PanelError {
+    PanelError::Window {
+        message: error.to_string(),
+    }
+}
+
+/// Opens a named panel (`wallet`, `approval`, `settings`). The frontend calls
+/// this through `app/src/lib/panels.ts`; unknown names come back as
+/// [`PanelError::UnknownPanel`].
+#[tauri::command]
+pub fn open_panel(app: AppHandle, name: String) -> Result<(), PanelError> {
+    open(&app, &name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The frontend `parsePanelRoute` and the tray both rely on exactly these
+    /// three names; a rename here is a breaking change to both.
+    #[test]
+    fn the_allow_list_is_exactly_the_three_known_panels() {
+        let names: Vec<&str> = PANELS.iter().map(|panel| panel.name).collect();
+        assert_eq!(names, vec![WALLET, APPROVAL, SETTINGS]);
+    }
+
+    #[test]
+    fn resolve_finds_known_panels() {
+        assert_eq!(resolve(WALLET).unwrap().name, WALLET);
+        assert_eq!(resolve(APPROVAL).unwrap().name, APPROVAL);
+        assert_eq!(resolve(SETTINGS).unwrap().name, SETTINGS);
+    }
+
+    #[test]
+    fn resolve_rejects_unknown_names_without_touching_a_window() {
+        assert_eq!(
+            resolve("bogus"),
+            Err(PanelError::UnknownPanel {
+                name: "bogus".into()
+            })
+        );
+        // Empty and case-sensitive: the allow-list is exact, not fuzzy.
+        assert!(resolve("").is_err());
+        assert!(resolve("Wallet").is_err());
+    }
+
+    /// Specs are sanity-checked here because the window builder can only be
+    /// exercised on a real event loop; these invariants are what a bad entry
+    /// would otherwise only reveal at runtime.
+    #[test]
+    fn every_spec_has_sane_geometry_and_a_route() {
+        for panel in PANELS {
+            assert!(
+                (320.0..=1200.0).contains(&panel.width),
+                "{} width out of range: {}",
+                panel.name,
+                panel.width
+            );
+            assert!(
+                (320.0..=1200.0).contains(&panel.height),
+                "{} height out of range: {}",
+                panel.name,
+                panel.height
+            );
+            assert_eq!(panel.route, format!("#/{}", panel.name));
+            assert!(panel.title.contains("Polaris"));
+        }
+    }
+
+    /// The capability file targets `panel-*`, and [`is_panel_label`] must agree
+    /// with it; a label that escaped the prefix would have no IPC permissions.
+    #[test]
+    fn every_label_is_namespaced_and_recognised() {
+        for panel in PANELS {
+            assert!(
+                panel.label.starts_with(LABEL_PREFIX),
+                "{} label is not namespaced: {}",
+                panel.name,
+                panel.label
+            );
+            assert!(is_panel_label(panel.label));
+        }
+        assert!(!is_panel_label("main"));
+        assert!(!is_panel_label("panel-unknown"));
+    }
+
+    #[test]
+    fn panel_url_carries_the_route_in_the_hash() {
+        assert_eq!(panel_url(resolve(WALLET).unwrap()), "index.html#/wallet");
+        assert_eq!(panel_url(resolve(APPROVAL).unwrap()), "index.html#/approval");
+        assert_eq!(panel_url(resolve(SETTINGS).unwrap()), "index.html#/settings");
+    }
+
+    /// The approval card must float above other windows; the others must not.
+    #[test]
+    fn only_the_approval_panel_is_always_on_top() {
+        assert!(resolve(APPROVAL).unwrap().always_on_top);
+        assert!(!resolve(WALLET).unwrap().always_on_top);
+        assert!(!resolve(SETTINGS).unwrap().always_on_top);
+    }
+
+    #[test]
+    fn panel_error_serializes_with_a_camel_case_kind() {
+        let json = serde_json::to_string(&PanelError::UnknownPanel {
+            name: "nope".into(),
+        })
+        .unwrap();
+        assert_eq!(json, r#"{"kind":"unknownPanel","name":"nope"}"#);
+    }
+}

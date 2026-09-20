@@ -18,7 +18,10 @@ tauri-build = { version = "2.6.3", features = [] }
 # `macos-private-api` is required for the transparent notch overlay
 # (`app.macOSPrivateApi` in tauri.conf.json is only a declaration; the runtime
 # transparency call is compiled out without this cargo feature).
-tauri = { version = "2.11.5", features = ["macos-private-api"] }
+#
+# Step W0: `tray-icon` enables the menu-bar status item that opens the panel
+# windows (accessory apps have no Dock icon, so the tray is their only chrome).
+tauri = { version = "2.11.5", features = ["macos-private-api", "tray-icon"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 

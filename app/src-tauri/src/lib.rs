@@ -15,6 +15,7 @@ mod gesture;
 mod hotkey;
 mod hotkey_flags;
 mod notch;
+mod panels;
 mod stt;
 mod timing;
 mod tts;
@@ -25,6 +26,7 @@ use tauri::Manager;
 pub use commands::{AppInfo, NETWORK};
 pub use events::{AgentStage, HotkeyState, PolarisEvent, SpeechState, POLARIS_EVENT_NAME};
 pub use notch::{NotchActivationPolicy, NotchGeometry, NotchWindowFlags};
+pub use panels::{PanelError, PanelSpec, PANELS};
 pub use types::CaptureStatus;
 
 /// Starts the desktop shell. Called from `main.rs`.
@@ -47,7 +49,12 @@ pub fn run() {
             notch::notch_geometry,
             notch::notch_window_flags,
             hotkey::hotkey_permission,
+            panels::open_panel,
         ])
+        // Step W0: a panel's close button hides it instead of quitting the app
+        // (the overlay's `main` window is never closed, so the close handler is
+        // only ever about panels).
+        .on_window_event(panels::handle_window_event)
         .setup(|app| {
             // Captures live under the app data dir so they never land in the repo.
             let recordings_dir = app.path().app_data_dir()?.join("recordings");
@@ -83,6 +90,10 @@ pub fn run() {
 
             // Configures AppKit geometry, then reveals the (initially hidden) window.
             notch::setup(app)?;
+
+            // Step W0: the menu-bar entry point for the panel windows. Polaris is
+            // an accessory app (no Dock icon), so this is the user's only chrome.
+            setup_tray(app)?;
 
             println!(
                 "polaris: notch overlay ready — hold Control+Option (or Control+Option+Space) \
@@ -133,3 +144,59 @@ fn apply_activation_policy(app: &mut tauri::App) {
 /// on every platform.
 #[cfg(not(target_os = "macos"))]
 fn apply_activation_policy(_app: &mut tauri::App) {}
+
+/// Tray menu item ids. `MenuEvent::id()` comes back as these exact strings.
+const TRAY_MENU_WALLET: &str = "wallet";
+const TRAY_MENU_SETTINGS: &str = "settings";
+const TRAY_MENU_QUIT: &str = "quit";
+
+/// Step W0: builds the menu-bar status item.
+///
+/// "Wallet…" and "Settings…" open their panels through the same registry the
+/// `open_panel` command uses, so the tray and the frontend cannot drift;
+/// "Quit Polaris" exits. The approval panel is deliberately absent: it is opened
+/// by the approval flow, never by hand.
+///
+/// The icon is the bundled app icon (`tauri-build` embeds it), so the tray needs
+/// no second asset. It is not marked as a template image because the app icon is
+/// a coloured glyph, not a monochrome template.
+fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
+    use tauri::menu::MenuBuilder;
+    use tauri::tray::TrayIconBuilder;
+
+    let menu = MenuBuilder::new(app)
+        .text(TRAY_MENU_WALLET, "Wallet…")
+        .text(TRAY_MENU_SETTINGS, "Settings…")
+        .separator()
+        .text(TRAY_MENU_QUIT, "Quit Polaris")
+        .build()?;
+
+    let mut builder = TrayIconBuilder::new()
+        .menu(&menu)
+        .tooltip("Polaris")
+        .on_menu_event(handle_tray_menu);
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon);
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
+/// Routes a tray menu selection. The panel names are the same registry names
+/// the command accepts, so the two entry points cannot drift.
+fn handle_tray_menu(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
+    match event.id().as_ref() {
+        TRAY_MENU_WALLET => {
+            if let Err(error) = panels::open(app, panels::WALLET) {
+                eprintln!("polaris: {error}");
+            }
+        }
+        TRAY_MENU_SETTINGS => {
+            if let Err(error) = panels::open(app, panels::SETTINGS) {
+                eprintln!("polaris: {error}");
+            }
+        }
+        TRAY_MENU_QUIT => app.exit(0),
+        _ => {}
+    }
+}
