@@ -54,6 +54,7 @@
 | 2026-09-20 | **NW1 — Notch Wallet page on real data**: `notch/data/useWalletData.ts` (stellar_config + Horizon + alias book + session `tx_submitted` latest tx, pure mapper) wired into `WalletPage.tsx`; check/tests 301 pass/build green; live notch needs a human | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/nw-wallet.md` | P1 |
 | 2026-09-20 | **NW2 — Notch Rules page → real guard rules**: `RulesPage.tsx` is a read-only summary, `useRulesData.ts` (thin hook + pure `mapRulesView`) reuses the Security panel's `stateLines` read-back; "Edit rules" opens the Security panel; check/app tests 299/0/build green, live notch needs a human | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/nw-rules.md` | P1 |
 | 2026-09-20 | **NW4 — notch History page → real data**: local 50-turn log (`lib/turnLog.ts`, fed from `App.tsx`) merged with owner Horizon payments via pure `historyModel.ts` mappers; `useHistoryData` with demo-only fallback + error/Retry, Refresh + "Clear local history"; `history` Debug check; check/app 308 pass/build green, real notch needs a human | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/nw-history.md` | P1 |
+| 2026-09-20 | **F3-fix — prompt leak**: language-aware prompt (EN/TR only when forced), prompt-echo + forced-language-mismatch filters, 700 ms pre-API minimum, agent unintelligible-transcript rule; live probe shows no echo; real-mic run still needs a human | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/f3-stt-vocab.md` | P0 |
 
 ## Completed Tasks (Archive)
 

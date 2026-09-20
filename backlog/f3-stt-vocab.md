@@ -28,3 +28,12 @@
 
 ## Human-verify / Blocked
 Real mic run on the owner's Mac (the Russian/hallucination case was intermittent and not reproduced); confirm `=off` and `POLARIS_STT_ALLOWED_LANGS` live. No blockers.
+
+## F3-fix — the prompt leaked into short clips
+- **Prompt is now in the language in use** (`stt::{DEFAULT_PROMPT_EN, DEFAULT_PROMPT_TR, DEFAULT_PROMPT}`): forced `en`/`tr` builds that language only (one natural example sentence + recipients in a sentence), auto keeps a short bilingual sentence. No more Turkish terms on an English clip.
+- **Filters** (`stt.rs`): prompt-echo (≥60 % prompt words and no leading-digit amount, or a ≥12-char literal prompt run, clips < 3 s), forced-language mismatch, known phrases; minimum clip raised to **700 ms** (`wav::MIN_DURATION_MS`, `Too short` pre-API). `Transcriber::{prompt,forced_language}` expose the hint to the free pre-flight; on-device stays unfiltered.
+- **Agent:** `agent/src/prompt.ts` adds an unintelligible-transcript rule + few-shot (`[en] Sorry, I didn't catch that.`) and a 120-char cap; `prompt.test.ts`.
+- **Verified:** `cargo test` **240 passed/0 failed/5 ignored**; `cargo clippy --all-targets -D warnings` clean; `npm run check` clean; `npm test -w @polaris/agent` **129 pass**, `-w @polaris/app` **173 pass**.
+- **Live probe** (`npm run stt:probe`, 27 calls): all 6 speech samples `ok` (`Send 10 XLM to acc2.` etc.); junk clips 0.7/1.0/1.5 s come back as `Recipients are acc2.`/`Altyazı M.K.`/`Raric…` — **no Turkish vocabulary echo**; the echo cases are flagged `prompt-echo`, the rest are caught by the agent rule.
+- **Note:** scope named `agent/src/capabilities.ts`, which does not exist on this branch (it lands on `integration/wallet`); the equivalent system prompt is `agent/src/prompt.ts`, edited there. `POLARIS_STT_LANGUAGE`/`_PROMPT` docs refreshed in `.env.example`.
+- **Human-verify:** real-mic run on the owner's Mac (English-forced short clip), `POLARIS_STT_PROMPT=off`, and `POLARIS_STT_ALLOWED_LANGS` live. No blockers.
