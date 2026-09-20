@@ -95,6 +95,7 @@
 - [x] Model choice (decided, recorded in notes.md): **cloud-first** — Groq `whisper-large-v3-turbo` behind a one-method `Transcriber` trait, so a local `whisper.cpp` backend can be added without touching call sites (2026-09-19, branch `feat/a1-stt`).
 - [x] Wire: captured audio → STT → `transcript { text, final }` on the event stream + Rust terminal; overlay shows "Thinking" only and never the transcript (2026-09-19).
 - [x] Retention (A0 review MAJOR-3): delete a recording after a successful transcription, keep failed ones, cap the recordings dir at 10 (2026-09-19).
+- [x] F3 reliability: bilingual Groq `prompt`, one-shot allowed-language retry, short-audio hallucination filter, `GroqTransport` seam + `npm run stt:probe` (2026-09-20, `fix/f3-stt-vocab`); real-mic run still needs a human (see `backlog/f3-stt-vocab.md`).
 - [ ] **Accept:** speak 5 different commands, all transcribe correctly, <2s latency on release — **blocked on a `GROQ_API_KEY` and a human run** (latency unmeasured so far; see `backlog/2026-09-19-a1-stt.md`).
 
 #### A2 — LLM roundtrip (text → agent → response) 🔲
