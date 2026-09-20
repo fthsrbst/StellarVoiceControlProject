@@ -46,6 +46,7 @@
 | 2026-09-20 | **Notch pages voice wiring**: call `setNotchPage(...)` (seam in `app/src/notch/notchPage.ts`) from Turkish intents + propose the `panel` state; then wire the 4 mock pages to real data | Owner A | open | `backlog/2026-09-20-notch-pages.md` | P1 |
 | 2026-09-20 | **W8a — P2P escrow contract** `polaris_p2p_escrow`: built + 20 tests + testnet deploy `CBMXLTXS76S72SIPLVMCQOSS6SN2CR4V3Q73GZPRA4GRIBEM7RE5OLJW`; TS client + order-book UI pending | Worker (opencode) | open | `backlog/w8a-p2p-escrow.md` | P1 |
 | 2026-09-20 | **T1-defaults — send defaults, balance tool, more assets**: `send_payment` no longer defaults a missing asset (asks instead), new read-only `get_balance` tool with deterministic spoken sentence + `toSpeech` loop branch (app injects a `stellar_config`/Horizon reader), PGUSD added to the chain asset registry; check + agent/stellar/app tests green, live eval 31/31=100% | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/t1-asset-defaults.md` | P1 |
+| 2026-09-20 | **NW2 — Notch Rules page → real guard rules**: `RulesPage.tsx` is a read-only summary, `useRulesData.ts` (thin hook + pure `mapRulesView`) reuses the Security panel's `stateLines` read-back; "Edit rules" opens the Security panel; check/app tests 299/0/build green, live notch needs a human | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/nw-rules.md` | P1 |
 
 ## Completed Tasks (Archive)
 
