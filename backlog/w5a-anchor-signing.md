@@ -32,3 +32,9 @@ Real browser + Freighter round trip for a challenge (as with W4b) and a live anc
 
 ## Blocked / handoff
 Nothing blocked; no out-of-scope files, no secrets, `POLARIS_ALLOW_AUTO_APPROVE` untouched. W5b (TS) consumes `bridge_sign_challenge` / `anchor_signing_health` (debug id `w5a.anchor.signing`, milestone `W5a`).
+
+## W5a-fix — review applied (2026-09-20)
+- BLOCKER 1 fixed: `find_signature_list` now requires `list_start >= SEQUENCE + 8`, and every body/slice access in `bridge/verify.rs` plus `approval.rs::signer_hint_of` uses `get(..)` → typed `VerifyError`. The reviewer's exact 200-char crafted PoC is a regression test (`MalformedSignatures`, no panic) plus a deterministic 2000-iteration fuzz loop over truncated/prefix/extended/garbage buffers for `parse_envelope`, `verify_signed`, `verify_challenge` (verify.rs), `validate_challenge_xdr` (commands.rs) and `signer_hint_of` (approval.rs).
+- MAJOR 2: W5a rows in `backlog.md`/`sprints.md` reworded — no `manage_data`-only claim; op types are explicitly not parsed.
+- MINOR 3/4/5: `c * 72 + 4` doc corrected; the anchor decoration is documented as presence/shape-only; the smallest-matching-count heuristic limit is documented in `find_signature_list`.
+- Tests: `cargo test` 248 passed / 0 failed / 5 ignored (was 243; bridge 66, was 62; approval 24); `cargo clippy --all-targets -- -D warnings` clean; `npm run check` tsc clean (TS untouched).

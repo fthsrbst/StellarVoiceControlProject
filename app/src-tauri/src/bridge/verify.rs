@@ -19,8 +19,9 @@
 //! SEP-10 challenge carrying the anchor's signature, and that challenge after the
 //! wallet adds its own (W5a). [`verify_signed`] requires the unsigned→one-signature
 //! transition; [`verify_challenge`] requires the one→two-signature transition plus
-//! the sequence-0 / non-owner-source shape. Any deviation is an integrity failure,
-//! never a partial success.
+//! the sequence-0 / non-owner-source shape. The anchor's stored decoration is
+//! checked for presence/shape only, never verified here (the anchor verifies its
+//! own challenge). Any deviation is an integrity failure, never a partial success.
 //!
 //! ## Residual risk: challenge operation types are not parsed
 //!
@@ -187,10 +188,16 @@ pub fn decode_envelope(base64_xdr: &str) -> Result<Vec<u8>, VerifyError> {
 ///
 /// A challenge arrives with the anchor's signature(s); an unsigned input has an
 /// empty list; a wallet-signed challenge has one more. The list is therefore
-/// found from the end: for a candidate count `c`, the last `c * 76 + 4` bytes
+/// found from the end: for a candidate count `c`, the last `c * 72 + 4` bytes
 /// must be `c` decorations of `hint(4) || 00000040 || signature(64)`. The first
-/// structurally valid count wins. Returns the byte offset of the 4-byte count
-/// and the parsed decorations, or `MalformedSignatures` when nothing fits.
+/// structurally valid count wins, so the **smallest** matching count is chosen
+/// (a genuine 1-sig challenge whose single decoration tail coincidentally parses
+/// as a 0-sig list is a ~2^-32 shape; [`verify_challenge`] then rejects it as
+/// unsigned rather than accepting a different body). `list_start` must also sit
+/// after the fixed header (source key, fee, sequence), so a short crafted buffer
+/// whose first four bytes mimic a count can never make the body slice run
+/// backwards. Returns the byte offset of the 4-byte count and the parsed
+/// decorations, or `MalformedSignatures` when nothing fits.
 fn find_signature_list(full: &[u8]) -> Result<(usize, Vec<DecoratedSignature>), VerifyError> {
     for count in 0..=MAX_SIGNATURES {
         // The tail is `[count: 4][decorations: count * 72]`.
@@ -198,15 +205,31 @@ fn find_signature_list(full: &[u8]) -> Result<(usize, Vec<DecoratedSignature>), 
             Some(start) => start,
             None => continue,
         };
-        if full[list_start..list_start + 4] != (count as u32).to_be_bytes() {
+        // The body must contain the fixed header. Without this, a 148-byte buffer
+        // whose first four bytes are the envelope type `00000002` is also read as
+        // "count = 2, list_start = 0", and `full[4..0]` panics.
+        if list_start < SEQUENCE + 8 {
+            continue;
+        }
+        let Some(count_bytes) = full.get(list_start..list_start + 4) else {
+            continue;
+        };
+        if count_bytes != (count as u32).to_be_bytes() {
             continue;
         }
         let mut signatures = Vec::with_capacity(count);
         let mut valid = true;
         for index in 0..count {
             let at = list_start + 4 + index * DECORATION_LEN;
-            let hint = &full[at..at + 4];
-            if full[at + 4..at + 8] != SIGNATURE_LEN {
+            let (Some(hint), Some(length), Some(signature)) = (
+                full.get(at..at + 4),
+                full.get(at + 4..at + 8),
+                full.get(at + 8..at + DECORATION_LEN),
+            ) else {
+                valid = false;
+                break;
+            };
+            if length != SIGNATURE_LEN {
                 valid = false;
                 break;
             }
@@ -215,7 +238,7 @@ fn find_signature_list(full: &[u8]) -> Result<(usize, Vec<DecoratedSignature>), 
                 signature: [0u8; 64],
             };
             parsed.hint.copy_from_slice(hint);
-            parsed.signature.copy_from_slice(&full[at + 8..at + 72]);
+            parsed.signature.copy_from_slice(signature);
             signatures.push(parsed);
         }
         if valid {
@@ -235,20 +258,34 @@ pub fn parse_envelope(full: &[u8]) -> Result<ParsedEnvelope<'_>, VerifyError> {
     if full.len() < SEQUENCE + 8 + 4 {
         return Err(VerifyError::Truncated);
     }
-    if full[..4] != ENVELOPE_TYPE_TX {
+    if full.get(..4).ok_or(VerifyError::Truncated)? != ENVELOPE_TYPE_TX {
         return Err(VerifyError::NotTransactionEnvelope);
     }
-    if full[SOURCE_KEY_TYPE..SOURCE_KEY] != KEY_TYPE_ED25519 {
+    if full
+        .get(SOURCE_KEY_TYPE..SOURCE_KEY)
+        .ok_or(VerifyError::Truncated)?
+        != KEY_TYPE_ED25519
+    {
         return Err(VerifyError::NotEd25519Source);
     }
     let (list_start, signatures) = find_signature_list(full)?;
     let mut source = [0u8; 32];
-    source.copy_from_slice(&full[SOURCE_KEY..SOURCE_KEY + 32]);
+    source.copy_from_slice(
+        full.get(SOURCE_KEY..SOURCE_KEY + 32)
+            .ok_or(VerifyError::Truncated)?,
+    );
     let mut fee_bytes = [0u8; 4];
-    fee_bytes.copy_from_slice(&full[FEE..FEE + 4]);
+    fee_bytes.copy_from_slice(full.get(FEE..FEE + 4).ok_or(VerifyError::Truncated)?);
     let mut sequence_bytes = [0u8; 8];
-    sequence_bytes.copy_from_slice(&full[SEQUENCE..SEQUENCE + 8]);
-    let body = &full[BODY_OFFSET..list_start];
+    sequence_bytes.copy_from_slice(
+        full.get(SEQUENCE..SEQUENCE + 8)
+            .ok_or(VerifyError::Truncated)?,
+    );
+    // `find_signature_list` already guarantees `list_start` is past the header,
+    // so this is in range; `get` keeps the body slice fallible regardless.
+    let body = full
+        .get(BODY_OFFSET..list_start)
+        .ok_or(VerifyError::Truncated)?;
     Ok(ParsedEnvelope {
         full,
         body,
@@ -303,19 +340,38 @@ pub fn verify_signed(
     // The signed envelope must be the unsigned prefix (`type || body`, with the
     // trailing zero signature count removed) followed by exactly one signature:
     // `00000001 || hint(4) || 00000040 || signature(64)`.
-    let prefix_len = unsigned.full.len() - 4;
+    let prefix_len = unsigned
+        .full
+        .len()
+        .checked_sub(4)
+        .ok_or(VerifyError::Truncated)?;
     let expected_signed_len = prefix_len + 4 + 4 + 4 + 64;
     if signed.len() != expected_signed_len {
         return Err(VerifyError::SignedNotOneSignature);
     }
-    if signed[..prefix_len] != unsigned.full[..prefix_len] {
+    let signed_prefix = signed.get(..prefix_len).ok_or(VerifyError::Truncated)?;
+    let unsigned_prefix = unsigned
+        .full
+        .get(..prefix_len)
+        .ok_or(VerifyError::Truncated)?;
+    if signed_prefix != unsigned_prefix {
         return Err(VerifyError::BodyMismatch);
     }
-    if signed[prefix_len..prefix_len + 4] != SIGNATURE_COUNT_ONE {
+    if signed
+        .get(prefix_len..prefix_len + 4)
+        .ok_or(VerifyError::SignedNotOneSignature)?
+        != SIGNATURE_COUNT_ONE
+    {
         return Err(VerifyError::SignedNotOneSignature);
     }
-    let hint = &signed[prefix_len + 4..prefix_len + 8];
-    if signed[prefix_len + 8..prefix_len + 12] != SIGNATURE_LEN {
+    let hint = signed
+        .get(prefix_len + 4..prefix_len + 8)
+        .ok_or(VerifyError::SignedNotOneSignature)?;
+    if signed
+        .get(prefix_len + 8..prefix_len + 12)
+        .ok_or(VerifyError::SignedNotOneSignature)?
+        != SIGNATURE_LEN
+    {
         return Err(VerifyError::SignedNotOneSignature);
     }
     if hint != &key[28..32] {
@@ -327,7 +383,9 @@ pub fn verify_signed(
     if unsigned.source != *key {
         return Err(VerifyError::SourceMismatch);
     }
-    let signature_bytes: [u8; 64] = signed[prefix_len + 12..prefix_len + 76]
+    let signature_bytes: [u8; 64] = signed
+        .get(prefix_len + 12..prefix_len + 76)
+        .ok_or(VerifyError::Truncated)?
         .try_into()
         .map_err(|_| VerifyError::Truncated)?;
     let signature = Signature::from_bytes(&signature_bytes);
@@ -352,10 +410,13 @@ pub fn verify_signed(
 /// * the source account is **not** `owner` (signing a transaction sourced by the
 ///   owner could authorize an owner action, even one that some abuse of the
 ///   challenge flow made it sign);
-/// * the challenge already carries **exactly one** signature (the anchor's), and
-///   the signed challenge keeps the challenge's body bytes byte-for-byte, keeps
-///   that signature, and adds exactly one more whose hint and Ed25519 signature
-///   match `owner` over the transaction hash (so 1 → 2 signatures).
+/// * the challenge already carries **exactly one** signature (the anchor's
+///   presence is checked by count only — that decoration is never verified here,
+///   because the anchor verifies its own challenge; only the owner's added
+///   signature is checked), and the signed challenge keeps the challenge's body
+///   bytes byte-for-byte, keeps that decoration, and adds exactly one more whose
+///   hint and Ed25519 signature match `owner` over the transaction hash (so
+///   1 → 2 signatures).
 ///
 /// On success returns the transaction hash. Any deviation is an integrity error.
 pub fn verify_challenge(
@@ -382,8 +443,11 @@ pub fn verify_challenge(
     let signed_bytes = decode_envelope(signed_base64)?;
     let signed = parse_envelope(&signed_bytes)?;
     // Same transaction: the body (everything between the type and the signature
-    // list) must be byte-identical.
-    if signed.full[..4] != challenge.full[..4] || signed.body != challenge.body {
+    // list) must be byte-identical. Both envelopes already parsed as v1
+    // transactions, so the type bytes match; the comparison is kept fallible.
+    let signed_type = signed.full.get(..4).ok_or(VerifyError::Truncated)?;
+    let challenge_type = challenge.full.get(..4).ok_or(VerifyError::Truncated)?;
+    if signed_type != challenge_type || signed.body != challenge.body {
         return Err(VerifyError::BodyMismatch);
     }
     if signed.signatures.len() != challenge.signatures.len() + 1 {
@@ -1039,5 +1103,82 @@ mod tests {
             ),
             Err(VerifyError::ChallengeNonZeroSequence)
         );
+    }
+
+    /// The reviewer's crafted 200-character envelope: 148 decoded bytes whose
+    /// first four are the envelope type `00000002`, which the old parser also
+    /// read as "count = 2, list_start = 0", panicking on `full[4..0]`.
+    const CRAFTED_POC_BASE64: &str = "AAAAAgAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgICAgAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQEBAQ==";
+
+    /// Calls every envelope entry point on `bytes`. A panic fails the test; a
+    /// typed `Err` is the expected outcome for hostile input.
+    fn assert_never_panics(bytes: &[u8]) {
+        let _ = parse_unsigned(bytes);
+        let _ = parse_envelope(bytes);
+        let encoded = BASE64.encode(bytes);
+        let _ = verify_signed(FIXTURE_XDR, &encoded, &OWNER_KEY, PASSPHRASE);
+        let _ = verify_challenge(
+            tests_support::CHALLENGE_XDR,
+            &encoded,
+            &tests_support::CHALLENGE_OWNER,
+            PASSPHRASE,
+        );
+    }
+
+    #[test]
+    fn the_reviewers_crafted_poc_is_refused_not_a_panic() {
+        let bytes = decode_envelope(CRAFTED_POC_BASE64).unwrap();
+        assert_eq!(bytes.len(), 148);
+        // Both the envelope type and the claimed two-signature count are 2.
+        assert_eq!(bytes[0..4], ENVELOPE_TYPE_TX);
+        assert_eq!(parse_envelope(&bytes), Err(VerifyError::MalformedSignatures));
+        assert_never_panics(&bytes);
+    }
+
+    #[test]
+    fn no_envelope_entry_point_panics_on_mutations() {
+        let fixture = decode_envelope(FIXTURE_XDR).unwrap();
+        let challenge = decode_envelope(tests_support::CHALLENGE_XDR).unwrap();
+        let signed = decode_envelope(&tests_support::add_signature_existing(
+            tests_support::CHALLENGE_XDR,
+            tests_support::CHALLENGE_OWNER_SEED,
+        ))
+        .unwrap();
+        let poc = decode_envelope(CRAFTED_POC_BASE64).unwrap();
+
+        // Deterministic xorshift: a failure is always reproducible.
+        let mut state = 0x2545_F491_4F6C_DD1Du64;
+        let mut rng = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+
+        // Truncations, prefixes and extensions of real envelopes: the shapes a
+        // hostile page can return.
+        for base in [&fixture, &challenge, &signed, &poc] {
+            for cut in 0..=base.len().min(96) {
+                assert_never_panics(&base[..cut]);
+            }
+            let mut zero_extended = base.clone();
+            zero_extended.extend_from_slice(&[0u8; 80]);
+            assert_never_panics(&zero_extended);
+            let mut ff_extended = base.clone();
+            ff_extended.extend_from_slice(&[0xFFu8; 76]);
+            assert_never_panics(&ff_extended);
+        }
+
+        // Random garbage plus random single-byte mutations of the signed envelope.
+        for _ in 0..2000 {
+            let len = (rng() % 320) as usize;
+            let garbage: Vec<u8> = (0..len).map(|_| rng() as u8).collect();
+            assert_never_panics(&garbage);
+
+            let mut mutated = signed.clone();
+            let at = (rng() as usize) % mutated.len();
+            mutated[at] ^= (rng() as u8) | 1;
+            assert_never_panics(&mutated);
+        }
     }
 }
