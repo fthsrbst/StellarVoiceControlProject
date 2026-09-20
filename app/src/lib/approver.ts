@@ -40,6 +40,7 @@
 import type { IntentApprover, ApprovalRequest } from "@polaris/agent";
 
 import { approvalBegin, type ApprovalStatus, type InvokeFn } from "./approval.ts";
+import type { PaymentStage } from "./turnSession.ts";
 
 /**
  * How long to wait for the gate's decision. The Rust approval TTL is 120 s
@@ -84,6 +85,12 @@ export interface ApproverDeps {
   now: () => number;
   setTimer: (callback: () => void, ms: number) => ReturnType<typeof setTimeout>;
   clearTimer: (handle: ReturnType<typeof setTimeout>) => void;
+  /**
+   * Additive (F1): reports the approval-request boundary so the notch can show
+   * "Approve in Polaris" for the whole gate wait. Optional, so existing callers
+   * and tests are unaffected.
+   */
+  onStage?: (stage: PaymentStage) => void;
 }
 
 /**
@@ -191,7 +198,9 @@ function waitForDecision(
  * Builds the production dependency set from the shell's real seams. Kept out of
  * the approver itself so the wait can be driven by an injected clock in tests.
  */
-export async function defaultApproverDeps(): Promise<ApproverDeps> {
+export async function defaultApproverDeps(
+  onStage?: (stage: PaymentStage) => void,
+): Promise<ApproverDeps> {
   const [{ listenPolarisEvents }, { invoke }, { openPanel }] = await Promise.all([
     import("@/lib/polaris"),
     import("@tauri-apps/api/core"),
@@ -209,6 +218,7 @@ export async function defaultApproverDeps(): Promise<ApproverDeps> {
     now: () => Date.now(),
     setTimer: (callback, ms) => setTimeout(callback, ms),
     clearTimer: (handle) => clearTimeout(handle),
+    onStage,
   };
 }
 
@@ -223,6 +233,9 @@ export async function defaultApproverDeps(): Promise<ApproverDeps> {
 export function createTouchIdApprover(deps: ApproverDeps): IntentApprover {
   return {
     async approve(request: ApprovalRequest): Promise<ApproverOutcome> {
+      // F1: the approval gate owns the notch from here until a decision lands;
+      // the shell shows "Approve in Polaris" for the whole wait.
+      deps.onStage?.("awaiting_approval");
       // Register the exact blob with the gate. The gate re-hashes it and rejects
       // a mismatch, so the digest the card showed binds what will be released.
       const id = await approvalBegin(

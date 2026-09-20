@@ -49,6 +49,7 @@ import {
   type SubmittedOutcome,
   type SigningDeps,
 } from "@/lib/signing";
+import type { PaymentStage } from "@/lib/turnSession";
 import committedAliases from "../../../stellar/config/aliases.json";
 
 /**
@@ -67,9 +68,11 @@ import committedAliases from "../../../stellar/config/aliases.json";
  */
 let approverPromise: Promise<IntentApprover> | undefined;
 
-async function resolveRuntimeApprover(): Promise<IntentApprover> {
+async function resolveRuntimeApprover(
+  onStage?: (stage: PaymentStage) => void,
+): Promise<IntentApprover> {
   if (isTauri()) {
-    const deps: ApproverDeps = await defaultApproverDeps();
+    const deps: ApproverDeps = await defaultApproverDeps(onStage);
     return createTouchIdApprover(deps);
   }
   if (import.meta.env.POLARIS_ALLOW_AUTO_APPROVE === "1") {
@@ -78,7 +81,12 @@ async function resolveRuntimeApprover(): Promise<IntentApprover> {
   return createDenyApprover();
 }
 
-function approverFor(): Promise<IntentApprover> {
+function approverFor(onStage?: (stage: PaymentStage) => void): Promise<IntentApprover> {
+  // A stage-reporting approver is bound to the turn that supplied the callback,
+  // so it is never memoized; the default approver still is.
+  if (onStage !== undefined) {
+    return resolveRuntimeApprover(onStage);
+  }
   approverPromise ??= resolveRuntimeApprover();
   return approverPromise;
 }
@@ -181,7 +189,9 @@ export async function executeApprovedIntent(
     guard_policy: guardPolicy,
     deposit: depositTry,
   } as const;
-  const approver = await approverFor();
+  // F1: `deps.onStage` (when supplied) threads the turn's stage reports through
+  // both the approval gate and the sign/submit path.
+  const approver = await approverFor(deps.onStage);
   const outcome: ExecutionOutcome = await executeIntent(intent, { approver, chainTools });
   return signAndSubmit(outcome, deps);
 }

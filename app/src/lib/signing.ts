@@ -30,6 +30,7 @@ import type { ExecutionOutcome } from "@polaris/agent";
 import { submitSignedTx, type SubmitResult } from "@polaris/stellar";
 
 import type { InvokeFn } from "./approval.ts";
+import type { PaymentStage } from "./turnSession.ts";
 
 /** The Rust `bridge_sign` success shape (`BridgeOutcome` camelCase). */
 export interface BridgeSigned {
@@ -103,6 +104,12 @@ export interface SigningDeps {
   submit: (signedXdr: string, expectedXdr?: string) => Promise<SubmitResult>;
   /** Emits `tx_submitted` to the webview. Routed to the Rust command by default. */
   emitSubmitted: (hash: string, explorerUrl: string) => Promise<void> | void;
+  /**
+   * Additive (F1): reports the Freighter wait and the submit boundary so the
+   * notch keeps the matching stage up. Optional, so existing callers and tests
+   * that do not care about UI stages are unaffected.
+   */
+  onStage?: (stage: PaymentStage) => void;
 }
 
 /** Default seams: the real Tauri invoke, the real submitter and emitter. */
@@ -138,6 +145,9 @@ export async function signAndSubmit(
     return outcome;
   }
 
+  // F1: the approved blob is handed to the wallet; the shell shows the Freighter
+  // wait from here until the signed envelope comes back.
+  deps.onStage?.("signing");
   let bridge: BridgeOutcome;
   try {
     bridge = await deps.invoke<BridgeOutcome>("bridge_sign", { id: approvalId });
@@ -152,6 +162,8 @@ export async function signAndSubmit(
     return fail(outcome, BRIDGE_LABELS[bridge.code], bridge.message);
   }
 
+  // F1: the signed envelope is on its way to Horizon.
+  deps.onStage?.("submitting");
   let submitted: SubmitResult;
   try {
     submitted = await deps.submit(bridge.signedXdr, unsignedXdr);
