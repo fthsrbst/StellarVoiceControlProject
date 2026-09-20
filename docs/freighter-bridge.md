@@ -48,7 +48,7 @@ The page is opened at `http://127.0.0.1:<port>/sign?t=<token>` (optional
   "xdr": "…",                     // base64 unsigned transaction envelope
   "networkPassphrase": "Test SDF Network ; September 2015",
   "address": "G…",                // the G address that must sign
-  "payloadHash": "…",             // hex transaction hash (informational)
+  "payloadHash": "…",             // optional hex digest of the unsigned XDR (see below)
   "summary": {
     "title": "Sign a testnet payment",
     "lines": ["From G…", "To G…", "Amount 1 XLM"],
@@ -61,6 +61,13 @@ The page is opened at `http://127.0.0.1:<port>/sign?t=<token>` (optional
 `403` / `404` / `410` with `{ "error": "…" }` when the token is unknown,
 consumed, or expired. The page treats `410` as the `expired` state and **posts
 nothing** (there is no valid token to answer to).
+
+`payloadHash` is an **optional** consistency token, not the security binding
+(that is the signed-vs-unsigned hash equality in §3). When the payload carries
+one, the page requires it to be a hex digest of the unsigned XDR: either the
+transaction signature-base hash (`tx.hash()`, what the approval flow emits today)
+or the SHA-256 of the UTF-8 bytes of the base64 XDR string. A payload that omits
+it is accepted; a payload that carries a different value is rejected.
 
 ### `POST /sign/result?t=<token>`
 
@@ -106,9 +113,13 @@ Rules, in order:
 6. On a user rejection (message matches `reject|declin|denied|cancel|refus`),
    post `rejected`. On any other error, post `error`.
 7. Verify the returned envelope (`app/src/bridge/verify.ts`): it must parse, have
-   the same source account and operation count as the input, and carry a
-   signature that `payload.address` verifies against the network-specific
-   transaction hash. Only then post `{ ok: true }`.
+   the same source account and operation count as the input, and — crucially —
+   have the **same signature-base hash** as the unsigned input. The hash commits
+   to source, fee, sequence, time bounds, memo and every operation, so a wallet
+   that returns a *different* transaction is rejected even with the same source
+   and operation count. The `payloadHash`, when present, must match the unsigned
+   XDR as well. Finally the signature must be by `payload.address` over that
+   hash. Fee-bump envelopes are refused. Only then post `{ ok: true }`.
 
 The result is posted **at most once**, even if the POST itself fails.
 
@@ -119,6 +130,7 @@ The result is posted **at most once**, even if the POST itself fails.
 | Concern | Mitigation |
 |---|---|
 | Another local process reads the token | Token is one-time and short-lived (W4b expiry); it is only in the URL the app opens. |
+| A non-loopback origin (e.g. DNS rebinding) drives the bridge | W4b rejects any request whose `Host`/`Origin` is not its own loopback origin (see §6). |
 | Token leaks via `Referer` to a third party | `no-referrer` on the document and on every `fetch`; nothing third-party is loaded. |
 | Any page can claim an address | Signatures are verified against the expected address before the result is accepted. |
 | Wrong-account signature | `address` is compared before signing; `address_mismatch` otherwise. |
@@ -149,8 +161,8 @@ POLARIS_ALIASES=G…,G… npm run bridge:fixture
 
 - `POLARIS_OWNER_ADDRESS` — the testnet G address that will sign (must have the
   Freighter account selected to Testnet).
-- `POLARIS_ALIASES` — comma-separated G addresses; the **first** is the
-  recipient.
+- `POLARIS_ALIASES` — comma-separated entries; each is a bare `G…` address or a
+  `name=G…` pair (the name is stripped). The **first** is the recipient.
 - `STELLAR_HORIZON_URL` / `STELLAR_NETWORK_PASSPHRASE` are optional; defaults are
   testnet.
 
@@ -185,6 +197,28 @@ W4b adds a Rust localhost server that:
    consulting the token store and the Touch ID approval gate before accepting a
    result;
 4. opens the URL in the user's default browser and waits for the result.
+
+### Requirements for the Rust server (W4b)
+
+The page assumes a hardened loopback-only endpoint. W4b must enforce all of the
+following, and the review of W4b must check them explicitly:
+
+- **Host:** the `Host` header must equal `127.0.0.1:<port>`.
+- **Origin:** the `Origin` header must be absent or exactly
+  `http://127.0.0.1:<port>`; any other origin is rejected.
+- **Content-Type:** `POST /sign/result` must carry
+  `Content-Type: application/json`; anything else is rejected.
+- **Body cap:** reject request bodies larger than 64 KiB.
+- **Response headers:** every response carries `Cache-Control: no-store` and
+  `Referrer-Policy: no-referrer`.
+- **CSP:** a restrictive `Content-Security-Policy` for the served page
+  (`default-src 'none'`, with only the bundled `script-src`/`style-src` allowed).
+- **Method allow-list:** only `GET /sign/payload`, `POST /sign/result` and static
+  `GET` are served; everything else is `404`/`405`.
+- **Token:** compare with a constant-time comparison, accept each token exactly
+  once, and expire it (TTL). Unknown/expired tokens answer `403`/`410`.
+- **CORS:** never emit `Access-Control-Allow-Origin` (or any other CORS header),
+  so cross-origin reads stay impossible.
 
 The page and the W4b server must stay in lockstep; change one, change the other.
 

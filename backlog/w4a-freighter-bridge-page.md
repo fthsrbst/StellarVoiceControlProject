@@ -295,3 +295,215 @@ retires the earlier "online sequence load was not observed" caveat.**
 - Real Freighter signing, and the rendered bridge UI, remain unverified (need a
   human with Freighter on Testnet).
 
+---
+
+## Review fixes 2 — apply the REJECT review
+
+- **Date:** 2026-09-20
+- **Worker/Agent:** opencode worker (deepseek-v4.1-flash)
+- **Branch/Worktree:** `feat/w4a-freighter-bridge-page` / `.worktrees/w4a-bridge-page`
+- **Review:** `backlog/w4a-freighter-bridge-page-review.md` (verdict REJECT)
+
+### BLOCKER 1 — the wallet must return the SAME transaction
+
+`app/src/bridge/verify.ts` now parses both envelopes with the payload's
+`networkPassphrase` and requires the two **signature-base hashes** to be equal
+(`toHex(signed.hash()) === toHex(unsigned.hash())`). This is the review's byte
+equality (`Buffer.from(...).equals(...)`); hex is used because the verifier runs
+in the browser and the project deliberately avoids the Node `Buffer` global in
+browser-safe code (cf. `stellar/src/payments/summary.ts`). The fresh bundle
+contains no bare `Buffer.` reference. That hash commits to source,
+fee, sequence, time bounds, memo and every operation, so a wallet that returns a
+different transaction is rejected even when the source and operation count match.
+The signature is then verified by `payload.address` over that same hash. Fee-bump
+(and any non-`Transaction`) envelopes are refused, consistent with
+`stellar/src/payments/summary.ts`. Previously equal source + equal op count was
+enough, so a reviewed "pay 1 XLM to X" could be swapped for another transaction.
+
+The optional `payloadHash` is now used too: when present it must be a hex digest
+of the unsigned XDR, else the result is `the payload hash does not match the
+unsigned transaction`.
+
+Before the fix (real function, same source + 1 op, different destination/amount/
+sequence/fee):
+
+```
+unsigned: dest A amount 1  seq 123
+signed  : dest B amount 100 seq 999 fee 100
+verifySignedXdr -> {"ok":true}
+```
+
+After:
+
+```
+unsigned: dest A amount 1  seq 123
+signed  : dest B amount 100 seq 999 fee 100
+verifySignedXdr -> {"ok":false,"reason":"the signed transaction is not the unsigned transaction"}
+```
+
+New regression tests in `app/src/bridge/verify.test.ts` (each failed on the
+pre-fix code): different destination, amount, sequence, fee, memo, time bounds;
+a tampered `payloadHash`; the honest case; a fee-bump envelope; and both
+accepted `payloadHash` forms. The existing different-source / different-op-count
+/ wrong-signer / malformed tests are kept.
+
+**Decision (flag for the coordinator):** the task's note said the approval flow
+defines `payloadHash` as "the SHA-256 hex of the UTF-8 bytes of the base64
+unsigned XDR string". The *implemented* approval flow does not: it emits the
+transaction signature-base hash (`stellar/src/payments/summary.ts:53,69`,
+`payloadHashOf`/`buildPaymentSummary`), and the W4a fixture/docs already do the
+same. Rather than silently break the honest path or diverge from the real
+contract, `verifySignedXdr` accepts **either** digest (both are functions of the
+same unsigned XDR; the mandatory signed-vs-unsigned hash equality is unaffected).
+Both forms are documented in `docs/freighter-bridge.md` §2. If the coordinator
+wants exactly one form, say which and it is a one-line change.
+
+### MAJOR 2 — user rejection for the real adapter
+
+The kit rejects with a plain `{ code, message, ext }` object (`parseError` in
+`node_modules/@creit.tech/stellar-wallets-kit/esm/sdk/utils.js`), not an `Error`.
+`isUserRejection` (`app/src/bridge/signFlow.ts`) now reads the message with
+`messageOf` and also treats the known Freighter decline code `-4` as a rejection.
+The code was confirmed from the shipped dependency: `FreighterApiDeclinedError =
+{ code: -4, message: "The user rejected this request." }` in
+`node_modules/@stellar/freighter-api`. `app/src/bridge/signFlow.test.ts` adds
+tests for the exact kit-shaped object, the code-only shape, an `Error`, a
+`string`, a non-rejection kit object, and `undefined`.
+
+### MAJOR 3 — the fixture now verifies the link
+
+`scripts/bridge-fixture.mjs` `verifySigned` receives the unsigned XDR and
+`payloadHash` and compares the returned envelope's hash to the unsigned hash
+before it can print `signature valid ✓`; it refuses fee-bump envelopes and also
+checks `payloadHash`. It is exported, and `scripts/bridge-fixture.test.mjs` now
+imports the page's real `verifySignedXdr`
+(`../app/src/bridge/verify.ts`) and pins the two to the same fixtures (honest,
+different destination/amount/sequence, wrong signer) plus explicit
+same-source/same-op-count and tampered-`payloadHash` cases. The duplicate is
+intentional: the fixture stays plain `.mjs` (any Node ≥22) while the test, like
+the app suite, already relies on type stripping.
+
+### MINOR 4 — docs
+
+`docs/freighter-bridge.md` gains a "Requirements for the Rust server (W4b)"
+section: `Host` must equal `127.0.0.1:<port>`; `Origin` absent or exactly
+`http://127.0.0.1:<port>`; `Content-Type: application/json` on POST; 64 KiB body
+cap; `Cache-Control: no-store` + `Referrer-Policy: no-referrer`; a restrictive
+CSP; a method allow-list; constant-time token comparison; single-use + TTL; and
+never any CORS header (`Access-Control-Allow-Origin`). The threat-model table and
+§2/§3 (`payloadHash`, hash equality) were updated to match; the `POLARIS_ALIASES`
+`name=G…` form is now documented (retires the W4a-fix handoff).
+
+### MINOR 5/6 + NITs
+
+- `backlog.md` Open Tasks row and a `sprints.md` “Signing bridge / W4a” checkbox
+  were added (this task explicitly allowed those two files).
+- NITs fixed: `explorerUrl` is now emitted only when it is a valid `https:`
+  URL (`javascript:` etc. are dropped); `runSignFlow(...)` gets a `.catch`; the
+  fixture compares tokens with `timingSafeEqual` and attaches the `finish`
+  listener before `end()`. The `session.consumed`-before-body ordering is left
+  as-is (it is deliberate single-use protection on a loopback dev tool).
+- Dependency footprint of `@creit.tech/stellar-wallets-kit@2.6.0` (recorded here
+  per the review, not a code change): the lockfile grows by **491
+  `node_modules/` entries** vs `origin/main` — the kit declares **19 direct
+  dependencies** (incl. `@reown/appkit@1.8.21`, `@walletconnect/sign-client@2.23.0`,
+  `@trezor/connect-web@10.0.0-beta.1`, `@ledgerhq/*`, `@stellar/freighter-api@6.0.0`)
+  and a large Solana subtree (`@coinbase/cdp-sdk`, `@solana/web3.js`). **Four**
+  newly-added packages carry install scripts: `@reown/appkit` (postinstall = a
+  local `package.json` version check, no network), `bufferutil`, `secp256k1`,
+  `utf-8-validate` (`node-gyp-build` native builds). `fsevents` already existed on
+  `main`. None of these modules are reachable from the built bundle's Freighter
+  path (see isolation check below).
+
+### Real output
+
+```
+$ npm run check                                   # exit 0
+> @polaris/{interfaces,agent,stellar,app} ... tsc -p tsconfig.json   (no diagnostics)
+
+$ npm test -w @polaris/app                        # exit 0
+ℹ tests 50
+ℹ pass 50
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+
+$ node --test scripts/bridge-fixture.test.mjs     # exit 0
+✔ loads the live sequence from a method-based Horizon account
+✔ falls back to the labelled offline placeholder when the loader rejects
+✔ a wrong-typed sequence is an error, never a silent offline fallback
+✔ parses bare and name-prefixed alias entries down to addresses
+✔ the fixture verifier accepts an honest owner signature and matches the payload hash
+✔ both verifiers reject a different transaction with the same source and op count
+✔ the two verifiers agree on the same fixtures
+✔ the fixture verifier rejects a tampered payload hash
+ℹ tests 8
+ℹ pass 8
+ℹ fail 0
+
+$ npm run build -w @polaris/app                   # exit 0 (fresh dist)
+✓ 809 modules transformed.
+dist/index.html                                  0.52 kB │ gzip:  0.31 kB
+dist/bridge.html                                 0.83 kB │ gzip:  0.45 kB
+dist/assets/bridge-B0UOhKdb.css                  2.76 kB │ gzip:  1.05 kB
+dist/assets/main-BkWtUz4C.css                   16.54 kB │ gzip:  4.26 kB
+dist/assets/utils-BSSViwnX.js                    0.51 kB │ gzip:  0.36 kB
+dist/assets/classPrivateFieldSet2-DlN4b7Pv.js    2.05 kB │ gzip:  0.99 kB
+dist/assets/sac-spec-B3J1ifeu.js                 9.79 kB │ gzip:  3.02 kB
+dist/assets/client-CVyLjtFK.js                  67.81 kB │ gzip: 16.23 kB
+dist/assets/bridge-DbAbDNI6.js                 121.85 kB │ gzip: 41.37 kB
+dist/assets/main-BIB01okB.js                   248.46 kB │ gzip: 78.92 kB
+dist/assets/src-Bk7ShMTt.js                    278.53 kB │ gzip: 44.01 kB
+dist/assets/transaction_builder-B67xwH7g.js    302.10 kB │ gzip: 72.06 kB
+✓ built in 131ms
+
+$ npm run bridge:fixture -- --selftest            # exit 0
+bridge:fixture: --selftest (offline, no Freighter)
+signature valid ✓  (tx hash 65766df9e44389e9cc112b9c83d29946bda0e70ed8dcc31e4da7af18896a36dc)
+signature INVALID: no signature by GB2JMJML6POMZOF2LZZTYM5UUYHXTZWKQW3Q6DOMPJSOX75APXLCTWKH
+bridge:fixture: selftest passed ✓
+```
+
+Bundle isolation, fresh `dist`:
+
+```
+freighter in main chunk:        0
+freighter in bridge chunk:      23
+bare `Buffer.` refs in bridge:  0   (verification is browser-safe: local toHex + SDK hash)
+```
+
+No Rust is in this change, so `cargo test` / `cargo clippy` are not applicable
+and were not run.
+
+### Files touched
+
+- `app/src/bridge/verify.ts` (same-transaction binding, payloadHash, fee-bump)
+- `app/src/bridge/verify.test.ts` (regression + honest + payloadHash + fee-bump)
+- `app/src/bridge/signFlow.ts` (`isUserRejection` via `messageOf`/code `-4`;
+  passes `payloadHash`)
+- `app/src/bridge/signFlow.test.ts` (kit-shaped / Error / string / undefined)
+- `app/src/bridge/types.ts` (`payloadHash` optional + doc)
+- `app/src/bridge/main.ts` (https-only explorer URL; flow `.catch`)
+- `scripts/bridge-fixture.mjs` (same-transaction verification, timing-safe token,
+  `finish` ordering)
+- `scripts/bridge-fixture.test.mjs` (pinning tests)
+- `docs/freighter-bridge.md` (W4b requirements; payloadHash; threat model; aliases)
+- `backlog.md`, `sprints.md`, this report
+
+### Remaining work / handoff
+
+- **Real Freighter signing and the rendered bridge UI are still unverified** —
+  unchanged by this fix; they need a human, Freighter on Testnet, and the
+  matching account.
+- **The `payloadHash` definition is a decision point** (see above): the bridge
+  currently accepts both the transaction hash and the SHA-256 of the base64 XDR
+  string. Confirm the intended single form for W4b.
+- W4b must implement every item in the new "Requirements for the Rust server
+  (W4b)" section before it is accepted.
+
+### Blocked / handoff
+
+- Nothing was blocked. No files outside the assigned scope were touched; no
+  secrets were read or printed; `POLARIS_ALLOW_AUTO_APPROVE` was not touched.
+
