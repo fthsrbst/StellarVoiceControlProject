@@ -12,6 +12,11 @@ import { speakSentence, speakTurnResult } from "@/lib/speech";
 import { failureSentence, submittedSentence } from "@polaris/agent";
 import { TurnFlow } from "@/lib/turnFlow";
 import {
+  recordTurnAnswer,
+  recordTurnOutcome,
+  recordTurnStart,
+} from "@/lib/turnLog";
+import {
   isActiveStage,
   isCurrentTurn,
   isPaymentStage,
@@ -174,6 +179,9 @@ export default function App() {
       if (admission.kind === "ignore") return;
       const { ticket } = admission;
       const current = (): boolean => flowRef.current.isCurrent(ticket);
+      // NW4: the local turn log records the turn from start to outcome, so the
+      // History page can show turns the chain never saw. No XDR is ever stored.
+      const logId = recordTurnStart(ticket.transcript);
       // The STT-detected language labels the notch stages until the agent reports
       // the reconciled language below.
       dispatchTurn({ type: "language", language: language ?? null });
@@ -199,12 +207,14 @@ export default function App() {
           if (!run.ok) {
             // Only the short label reaches the notch; the full detail is already
             // on the console and in the Rust log.
+            recordTurnOutcome(logId, { label: `failed: ${run.failure.label}` });
             dispatchTurn({ type: "failed", label: run.failure.label });
             return;
           }
           // The model's reconciled language is the authoritative one for the
           // reply/voice (A14), so it also drives the notch labels from here on.
           dispatchTurn({ type: "language", language: run.outcome.language ?? null });
+          recordTurnAnswer(logId, run.outcome.answer);
           if (!run.outcome.intent) {
             // A conversational turn has nothing to execute: speak the answer and
             // let the real `speech_status` stream end the turn.
@@ -243,6 +253,11 @@ export default function App() {
                 // W4b: the signed transaction reached the network. Announce the
                 // real result (not the pre-approval confirmation) and let the
                 // real `speech_status` stream end the turn.
+                recordTurnOutcome(logId, {
+                  label: "tx_submitted",
+                  txHash: outcome.txHash,
+                  explorerUrl: outcome.explorerUrl ?? null,
+                });
                 console.info("transaction submitted", outcome.explorerUrl);
                 const sentence = submittedSentence(intent, run.outcome.language);
                 speakSentence(sentence, run.outcome.language, (error) => {
@@ -256,6 +271,7 @@ export default function App() {
                 // a short spoken line plus the visible label.
                 console.warn(`execution ${outcome.status}: ${outcome.detail ?? ""}`);
                 const label = outcome.label ?? "Chain error";
+                recordTurnOutcome(logId, { label: `failed: ${label}` });
                 speakSentence(
                   failureSentence(label, run.outcome.language),
                   run.outcome.language,
@@ -266,6 +282,7 @@ export default function App() {
             .catch((error: unknown) => {
               if (disposed || !isCurrentTurn(sessionRef.current, turnId)) return;
               console.error("execution seam failed unexpectedly", error);
+              recordTurnOutcome(logId, { label: "failed: Chain error" });
               dispatchTurn({ type: "failed", label: "Chain error" });
             });
         })

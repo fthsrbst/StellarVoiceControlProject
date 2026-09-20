@@ -53,3 +53,12 @@ alias book. States: `unconfigured` ("Guard not configured"), `not_set_up` (rule
 mock. Outside Tauri, or when `stellar_config` has no owner, the page shows the
 labelled mock demo. The page is read-only — its only action is "Edit rules in
 Security", which calls `openPanel("security")`.
+## History (NW4)
+`HistoryPage` now reads `useHistoryData`, which merges the local turn log
+(`lib/turnLog.ts`, a 50-entry `localStorage` ring buffer fed from `App.tsx`) with
+the owner's recent Horizon payments (`fetchOwnerPayments` → `mapWalletTransactions`
+→ `historyModel.ts` mappers), newest first and de-duplicated by tx hash. The page
+is refreshed on open and via a Refresh action; "Clear local history" empties the
+turn log. The mock timeline is used **only** when not running in Tauri or when
+`stellar_config` has no owner address; a failed real read shows its error with a
+Retry. The turn log stores no XDR and no secret material.
