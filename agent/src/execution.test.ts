@@ -8,9 +8,10 @@ import {
   createDenyApprover,
   executeIntent,
   isNotImplementedError,
-  payloadHashOfXdr,
   resolveApprover,
   sha256Hex,
+  xdrDigest,
+  type ApprovalDecision,
   type ApprovalRequest,
   type ChainToolSet,
   type IntentApprover,
@@ -28,6 +29,19 @@ const RESULT: ChainToolResult = {
 };
 
 const HASH = sha256Hex(RESULT.unsignedXdr);
+
+/**
+ * One fixed, valid transaction envelope (a deterministic offline testnet payment)
+ * and its two hashes. `XDR_FIXTURE_DIGEST` is SHA-256 of the base64 XDR string
+ * (the seam's `payloadHash`); `XDR_FIXTURE_TX_HASH` is the chain lane's
+ * `Transaction.hash()`, a different value. Pinned together so the two can never
+ * be swapped (M-1); the stellar suite pins the tx hash for this same fixture
+ * through `payloadHashOf`.
+ */
+const XDR_FIXTURE =
+  "AAAAAgAAAACWE1NPjv0inU+SO2ece8tfmKLpxA1Koj58eR9H1N3a0wAAAGQAAAAAAAAD6QAAAAEAAAAAAAAAAAAAAABqrnpsAAAAAAAAAAEAAAAAAAAAAQAAAAAje1WiTrVNOjrawB7nsbI1cqE5BqO5xeWilY91MM5cSwAAAAFVU0RDAAAAAEI+fQXy7K+/7BkrIVo/G+lq7bjY5wJUq+NBPgIH3layAAAAAAX14QAAAAAAAAAAAA==";
+const XDR_FIXTURE_DIGEST = "c1d5910a3bfed5a4841a56863cc3ad92b9ff4d4b556c35ffd14ab4daab10192f";
+const XDR_FIXTURE_TX_HASH = "2f38a676d5ed29dad5043f5f105fe78c7fb355a4dd1bfc56c5e90ae33df33a2a";
 
 /** Records the order in which the gate and the tool are reached. */
 function recordingApprover(
@@ -70,7 +84,7 @@ test("the tool builds first and the approver receives the summary + payload hash
   assert.deepEqual(seen, { intent: INTENT, summary: RESULT.summary, payloadHash: HASH });
 });
 
-test("the payload hash can be injected (used by tests to pin the request)", async () => {
+test("the XDR digest can be injected (used by tests to pin the request)", async () => {
   let seen: ApprovalRequest | undefined;
   const approver: IntentApprover = {
     async approve(request) {
@@ -82,7 +96,7 @@ test("the payload hash can be injected (used by tests to pin the request)", asyn
   const outcome = await executeIntent(INTENT, {
     approver,
     chainTools: { send: async () => RESULT },
-    payloadHash: () => "deadbeef",
+    xdrDigest: () => "deadbeef",
   });
 
   assert.equal(outcome.status, "executed");
@@ -253,6 +267,87 @@ test("a throwing approver becomes a labelled failure and keeps no result", async
 });
 
 /* ------------------------------------------------------------------ *
+ * M-2 — a malformed tool result fails closed, never `executed`.
+ * ------------------------------------------------------------------ */
+
+test("a tool result without a non-empty unsignedXdr fails closed", async () => {
+  const cases: unknown[] = [
+    {},
+    { summary: RESULT.summary },
+    { unsignedXdr: "", summary: RESULT.summary },
+  ];
+  for (const value of cases) {
+    let approveCalls = 0;
+    const outcome = await executeIntent(INTENT, {
+      approver: {
+        async approve() {
+          approveCalls += 1;
+          return { approved: true };
+        },
+      },
+      chainTools: { send: async () => value as ChainToolResult },
+    });
+    assert.equal(outcome.status, "failed");
+    assert.equal(outcome.label, "Chain error");
+    assert.equal(outcome.result, undefined);
+    assert.equal(outcome.payloadHash, undefined);
+    assert.equal(approveCalls, 0, "a malformed result must not open the approval gate");
+  }
+});
+
+test("a tool result with a malformed summary fails closed", async () => {
+  const summaries: unknown[] = [
+    undefined,
+    null,
+    {},
+    { title: "Send", lines: "not-an-array", estimatedFee: "0.00001 XLM" },
+    { title: "Send", lines: [1], estimatedFee: "0.00001 XLM" },
+    { title: 1, lines: [], estimatedFee: "0.00001 XLM" },
+  ];
+  for (const summary of summaries) {
+    const outcome = await executeIntent(INTENT, {
+      approver: recordingApprover({ approved: true }, []),
+      chainTools: {
+        send: async () => ({ unsignedXdr: "AAAA", summary }) as unknown as ChainToolResult,
+      },
+    });
+    assert.equal(outcome.status, "failed");
+    assert.equal(outcome.label, "Chain error");
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * m-4 — `executeIntent` "never throws" on a broken caller/impl.
+ * ------------------------------------------------------------------ */
+
+test("an undefined chain tool set fails closed instead of throwing", async () => {
+  const outcome = await executeIntent(INTENT, {
+    approver: recordingApprover({ approved: true }, []),
+    chainTools: undefined as unknown as ChainToolSet,
+  });
+
+  assert.equal(outcome.status, "unsupported");
+  assert.equal(outcome.label, "Not supported");
+});
+
+test("an approver that resolves to no decision fails closed instead of throwing", async () => {
+  for (const decision of [undefined, null]) {
+    const outcome = await executeIntent(INTENT, {
+      approver: {
+        async approve() {
+          return decision as unknown as ApprovalDecision;
+        },
+      },
+      chainTools: { send: async () => RESULT },
+    });
+
+    assert.equal(outcome.status, "failed");
+    assert.equal(outcome.label, "Approval error");
+    assert.match(outcome.detail ?? "", /no decision/);
+  }
+});
+
+/* ------------------------------------------------------------------ *
  * M5 — the default approver fails closed.
  * ------------------------------------------------------------------ */
 
@@ -286,10 +381,10 @@ test("the deny gate denies with a reason, and auto-approval needs the opt-in", a
 });
 
 /* ------------------------------------------------------------------ *
- * W1 — the payload hash is a pure SHA-256 of the unsigned XDR.
+ * W1 — the payload hash is a pure SHA-256 of the unsigned XDR string.
  * ------------------------------------------------------------------ */
 
-test("sha256Hex matches the known SHA-256 vectors", () => {
+test("sha256Hex matches the known SHA-256 vectors (multi-block + UTF-8)", () => {
   assert.equal(
     sha256Hex(""),
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -302,8 +397,37 @@ test("sha256Hex matches the known SHA-256 vectors", () => {
     sha256Hex("The quick brown fox jumps over the lazy dog"),
     "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592",
   );
+  // The NIST 56-byte message crosses the single-block boundary (two blocks).
+  assert.equal(
+    sha256Hex("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"),
+    "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
+  );
+  // A 72-byte UTF-8 string (Turkish + an emoji): multi-block and multi-byte, so
+  // a `TextEncoder`/padding regression cannot pass.
+  assert.equal(
+    sha256Hex("Gönder 10 XLM → Ada üzerinden 🚀 güvenli imza sırası ışığı"),
+    "e1bcfee430085042156f5cf262c326aa82a46032aff0d7388300b075baa0503a",
+  );
 });
 
-test("payloadHashOfXdr hashes the XDR string", () => {
-  assert.equal(payloadHashOfXdr(RESULT.unsignedXdr), sha256Hex(RESULT.unsignedXdr));
+test("the XDR digest is not the Stellar transaction hash (swap regression)", async () => {
+  // The helper and the seam must both use the string digest, never the tx hash.
+  assert.equal(xdrDigest(XDR_FIXTURE), XDR_FIXTURE_DIGEST);
+  assert.notEqual(XDR_FIXTURE_DIGEST, XDR_FIXTURE_TX_HASH);
+
+  let seen: ApprovalRequest | undefined;
+  const outcome = await executeIntent(INTENT, {
+    approver: {
+      async approve(request) {
+        seen = request;
+        return { approved: true };
+      },
+    },
+    chainTools: { send: async () => ({ ...RESULT, unsignedXdr: XDR_FIXTURE }) },
+  });
+
+  assert.equal(outcome.status, "executed");
+  assert.equal(outcome.payloadHash, XDR_FIXTURE_DIGEST);
+  assert.equal(seen?.payloadHash, XDR_FIXTURE_DIGEST);
+  assert.notEqual(outcome.payloadHash, XDR_FIXTURE_TX_HASH);
 });

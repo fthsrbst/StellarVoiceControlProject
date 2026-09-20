@@ -43,6 +43,29 @@
  * [`createAutoApprovalPlaceholder`] is a loud stand-in for the stubbed demo only
  * and is never the default.
  *
+ * ## The ``payloadHash`` is the XDR digest, not the Stellar transaction hash (W1)
+ *
+ * Two different values are both called a "hash" in this system. They are **not**
+ * interchangeable, and one must never be passed where the other is expected.
+ *
+ * - **XDR digest — `payloadHash`.** Lowercase-hex SHA-256 of the UTF-8 bytes of
+ *   the base64 unsigned-XDR string ([`xdrDigest`]). This is the value carried at
+ *   the seam: `ApprovalRequest.payloadHash`, `ExecutionOutcome.payloadHash`, and
+ *   the `approval_request` / `approval_result` events. It binds the exact blob a
+ *   signer will be handed, and it is computable in Rust without XDR parsing.
+ *   At the gate/event boundary the field is named `payloadHash` and *always*
+ *   means this digest.
+ * - **Stellar transaction hash.** `Transaction.hash()` over the same envelope,
+ *   i.e. `payloadHashOf` in `@polaris/stellar`
+ *   (`stellar/src/payments/summary.ts`). It identifies the transaction on-chain;
+ *   the chain summary puts it in the explorer URL. It is derived from the network
+ *   passphrase and the envelope, not from the base64 string, so it differs from
+ *   the digest.
+ *
+ * The regression test pins both values for one fixed XDR fixture: the transaction
+ * hash must never be used at the approval gate, and the digest must never be used
+ * as an on-chain identifier.
+ *
  * Signing and submission are **not** part of this seam. An `executed` outcome
  * carries the `ChainToolResult` and the `payloadHash` so a later milestone (the
  * Touch ID gate) can sign and submit; nothing here does either.
@@ -76,8 +99,12 @@ export interface ApprovalDecision {
 
 /**
  * Post-tool material handed to the approval gate: the intent, the summary
- * decoded from the unsigned XDR, and that XDR's `payloadHash`. This is exactly
- * what the approval card renders (mirrors `PolarisEvent::approval_request`).
+ * decoded from the unsigned XDR, and `payloadHash` — the **XDR digest** (SHA-256
+ * of the base64 unsigned-XDR string, [`xdrDigest`]). This is exactly what the
+ * approval card renders (mirrors `PolarisEvent::approval_request`).
+ *
+ * `payloadHash` here is never the Stellar transaction hash; see the module
+ * header. The signing milestone must bind the signer to this digest.
  */
 export interface ApprovalRequest {
   intent: Intent;
@@ -250,8 +277,16 @@ export function sha256Hex(input: string): string {
     .join("");
 }
 
-/** Hex SHA-256 of the unsigned XDR — the approval card's `payloadHash`. */
-export function payloadHashOfXdr(unsignedXdr: string): string {
+/**
+ * The seam's `payloadHash`: lowercase-hex SHA-256 of the UTF-8 bytes of the
+ * base64 unsigned-XDR string (the **XDR digest**). This is what binds the exact
+ * blob a signer is handed, and it is computable in Rust without XDR parsing.
+ *
+ * Do not confuse it with the Stellar transaction hash (`Transaction.hash()`,
+ * `payloadHashOf` in `@polaris/stellar`), which is a different value and must
+ * never be passed where the digest is expected. See the module header.
+ */
+export function xdrDigest(unsignedXdr: string): string {
   return sha256Hex(unsignedXdr);
 }
 
@@ -276,8 +311,9 @@ export interface ExecutionOutcome {
   /** The unsigned XDR + decoded summary. Present iff `status === "executed"`. */
   result?: ChainToolResult;
   /**
-   * Hex SHA-256 of the unsigned XDR. Present iff `status === "executed"`; it is
-   * what a later signing step must be bound to.
+   * The **XDR digest** — hex SHA-256 of the base64 unsigned-XDR string. Present
+   * iff `status === "executed"`; it is what a later signing step must be bound
+   * to. It is never the Stellar transaction hash.
    */
   payloadHash?: string;
 }
@@ -288,10 +324,10 @@ export interface ExecuteIntentOptions {
   /** Owner B's tools, injected by the composition root. */
   chainTools: ChainToolSet;
   /**
-   * Overrides the XDR hash function (used by tests to pin the request). Defaults
-   * to [`payloadHashOfXdr`].
+   * Overrides the XDR digest function (used by tests to pin the request).
+   * Defaults to [`xdrDigest`].
    */
-  payloadHash?: (unsignedXdr: string) => string;
+  xdrDigest?: (unsignedXdr: string) => string;
 }
 
 /** True for Owner B's `NotImplementedError` stubs, matched structurally. */
@@ -316,6 +352,30 @@ function detailOf(error: unknown): string {
 }
 
 /**
+ * Runtime guard for a chain tool's result. `ChainTool` promises a non-empty
+ * `unsignedXdr` plus a well-formed `summary`, but the tools are injected and
+ * this seam is the safety boundary, so a malformed result must fail closed
+ * rather than produce an `executed` outcome with a bogus hash (M-2).
+ */
+function isUsableToolResult(value: unknown): value is ChainToolResult {
+  if (typeof value !== "object" || value === null) return false;
+  const { unsignedXdr, summary } = value as { unsignedXdr?: unknown; summary?: unknown };
+  if (typeof unsignedXdr !== "string" || unsignedXdr.length === 0) return false;
+  if (typeof summary !== "object" || summary === null) return false;
+  const { title, lines, estimatedFee } = summary as {
+    title?: unknown;
+    lines?: unknown;
+    estimatedFee?: unknown;
+  };
+  return (
+    typeof title === "string" &&
+    Array.isArray(lines) &&
+    lines.every((line) => typeof line === "string") &&
+    typeof estimatedFee === "string"
+  );
+}
+
+/**
  * The single path from a validated `Intent` to its chain tool and its approval.
  *
  * Order is part of the contract (pinned by a test): resolve the tool, build the
@@ -323,11 +383,13 @@ function detailOf(error: unknown): string {
  *
  * - `unsupported` — no chain tool is registered for this intent kind.
  * - `unavailable` — the tool exists but is not wired yet (`NotImplementedError`).
- * - `failed` — the tool threw (including a `not_configured` refusal), or the
- *   approver threw.
+ * - `failed` — the tool threw (including a `not_configured` refusal), returned a
+ *   result without a usable unsigned XDR + summary, or the approver threw / gave
+ *   no decision.
  * - `rejected` — the approver denied; the built result is discarded.
  * - `executed` — the tool returned an unsigned XDR + summary and the approver
- *   approved; `result` + `payloadHash` are returned for the signing step.
+ *   approved; `result` + `payloadHash` (the XDR digest) are returned for the
+ *   signing step.
  *
  * Never throws: a throwing approver (the realistic Touch ID error/cancel shape)
  * is caught and returned as a labelled `failed` outcome, exactly like a tool
@@ -337,7 +399,7 @@ export async function executeIntent(
   intent: Intent,
   options: ExecuteIntentOptions,
 ): Promise<ExecutionOutcome> {
-  const tool = options.chainTools[intent.kind];
+  const tool = options.chainTools?.[intent.kind];
   if (!tool) {
     return {
       status: "unsupported",
@@ -349,9 +411,9 @@ export async function executeIntent(
 
   // Build first: a `ChainTool` only produces the unsigned XDR + summary, so this
   // moves no value and lets the approval card show what would really be signed.
-  let result: ChainToolResult;
+  let rawResult: unknown;
   try {
-    result = await tool(intent);
+    rawResult = await tool(intent);
   } catch (error) {
     if (isNotImplementedError(error)) {
       return {
@@ -372,12 +434,23 @@ export async function executeIntent(
     return { status: "failed", intent, label: "Chain error", detail: detailOf(error) };
   }
 
-  const payloadHash = (options.payloadHash ?? payloadHashOfXdr)(result.unsignedXdr);
+  // Fail closed on a malformed result (M-2): no `unsignedXdr`, no `executed`.
+  if (!isUsableToolResult(rawResult)) {
+    return {
+      status: "failed",
+      intent,
+      label: "Chain error",
+      detail: "the chain tool returned no usable unsigned XDR + summary",
+    };
+  }
+  const result = rawResult;
+
+  const payloadHash = (options.xdrDigest ?? xdrDigest)(result.unsignedXdr);
   const request: ApprovalRequest = { intent, summary: result.summary, payloadHash };
 
-  let decision: ApprovalDecision;
+  let rawDecision: unknown;
   try {
-    decision = await options.approver.approve(request);
+    rawDecision = await options.approver.approve(request);
   } catch (error) {
     // A biometric gate may reject or error by throwing (cancel, hardware
     // failure). That must not escape the seam: map it to a labelled outcome so
@@ -389,13 +462,27 @@ export async function executeIntent(
       detail: detailOf(error),
     };
   }
-  if (!decision.approved) {
+  // A non-object decision (an approver that resolved to `undefined`/`null`) is a
+  // broken gate, not an approval (m-4): settle it as a failure.
+  if (typeof rawDecision !== "object" || rawDecision === null) {
+    return {
+      status: "failed",
+      intent,
+      label: "Approval error",
+      detail: "the approver returned no decision",
+    };
+  }
+  const decision = rawDecision as ApprovalDecision;
+  if (decision.approved !== true) {
     // The XDR was built but is discarded: nothing reaches a signer.
     return {
       status: "rejected",
       intent,
       label: "Not approved",
-      detail: decision.reason ?? "the approval gate rejected the intent",
+      detail:
+        typeof decision.reason === "string"
+          ? decision.reason
+          : "the approval gate rejected the intent",
     };
   }
 
