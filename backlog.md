@@ -12,6 +12,7 @@
 
 | Date | Task | Worker/Agent | Status | Report | Priority |
 |---|---|---|---|---|---|
+| 2026-09-20 | **T1-demo — demo script, pitch, README status (docs only)**: `docs/demo-script.md` (3–4 min live script + fallbacks + pre-flight), `docs/pitch.md`, README status sections refreshed; live mic/Touch ID/Freighter marked `[verify live]` | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/t1-demo-script.md` | P0 |
 | 2026-09-20 | **W8b — P2P ramp (client + voice + panel)**: `@polaris/stellar` `p2p` client (create/accept/confirm/cancel/reclaim + reads, mocks), `p2p_*` voice intents + tools, P2P panel via `txPipeline`, Debug check + `POLARIS_P2P_CONTRACT_ID` config field; live contract + real Mac unverified | opencode worker (deepseek-v4.1-flash) | open (review) | `backlog/w8b-p2p-client.md` | P1 |
 | 2026-09-20 | **W1 — network wiring**: `stellar_config` command + `StellarConfig`, build-then-approve execution seam (summary + `payloadHash`), lazy `chain.ts` config with alias merge, live `e2e:build-xdr` proof; signing/submission handed off | worker (deepseek-v4.1-flash) | open (review) | `backlog/w1-network-wiring.md` | P0 |
 | 2026-09-20 | **W1-fix — review corrections**: `xdrDigest` vs Stellar tx hash disambiguation + cross-suite regression test, malformed tool result fails closed, `executeIntent` never-throw holes closed, StrKey CRC16 checksum, SHA-256 multi-block/UTF-8 vectors, stale-doc fixes | worker (deepseek-v4.1-flash) | open (review) | `backlog/w1-network-wiring.md` | P0 |
