@@ -23,6 +23,7 @@ mod stellar_config;
 mod stt;
 mod timing;
 mod tts;
+mod tx_events;
 mod types;
 mod voice_health;
 
@@ -64,6 +65,7 @@ pub fn run() {
             health::biometric_health,
             health::biometric_selftest,
             voice_health::voice_health,
+            tx_events::tx_submitted_emit,
         ])
         // Step W0: a panel's close button hides it instead of quitting the app
         // (the overlay's `main` window is never closed, so the close handler is
