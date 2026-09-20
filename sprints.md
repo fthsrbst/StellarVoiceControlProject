@@ -222,6 +222,7 @@
 - [ ] **T6.** Demo runbook completed after T1/T2/T5 (`docs/demo-runbook.md`)
 - [x] (2026-09-20, `integration/wallet`) **Merge-fix.** Repaired the naive five-branch merge (interfaces/agent/app/Rust); all checks, tests, build and clippy green — `backlog/merge-fix-integration.md`
 - [x] (2026-09-20, `integration/wallet`) **MERGE-FIX2.** Fixed the W5a-broken Rust test build (`challenge` field in two test initializers) and re-scanned the last three merges for keep-both damage (none found); cargo test/clippy, `npm run check`, app/agent tests green — `backlog/merge-fix-integration.md`
+- [x] (2026-09-20, `integration/wallet`) **MERGE-MAIN.** Merged Fatih's notch shell (origin/main #23/#24) into the pipeline branch: one App bridge over our turn session + his shell machine, typed prompt through `executeApprovedIntent`, debug check ported to `getShellGeometry`, `window_size` BUG-1 fix; all checks/tests/build/clippy green — `backlog/merge-main-notch-shell.md`
 - [x] (2026-09-20, W6a-fix) Review fixes: per-step resequencing in `runTxSequence` (B1), mode-driven plan (M2), alias union + read-failed (M3), honest wording + double-click guard (N4–N8) — `backlog/w6a-security-panel.md`
 - [ ] **T6.** Demo runbook completed after T1/T2/T5 (`docs/demo-runbook.md`)
 

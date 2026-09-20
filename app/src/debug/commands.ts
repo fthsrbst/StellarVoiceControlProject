@@ -7,17 +7,6 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-/** The `notch_window_flags` payload (mirrors `NotchWindowFlags` in Rust). */
-export interface NotchWindowFlags {
-  /** Raw `NSWindowLevel` (`NSPopUpMenuWindowLevel` is 101). */
-  level: number;
-  collectionBehavior: number;
-  fullScreenAuxiliary: boolean;
-  canJoinAllSpaces: boolean;
-  focusable: boolean;
-  activationPolicy: "regular" | "accessory" | "prohibited" | "unknown" | "unsupported";
-}
-
 /** The `voice_health` payload (mirrors `VoiceHealth` in Rust). */
 export interface VoiceHealth {
   sttBackend: "groq" | "ondevice";
@@ -64,11 +53,6 @@ export type DebugBridgeOutcome =
         | "error";
       message: string;
     };
-
-/** Live AppKit flags of the overlay window. */
-export async function getNotchWindowFlags(): Promise<NotchWindowFlags> {
-  return invoke<NotchWindowFlags>("notch_window_flags");
-}
 
 /** Non-secret voice-pipeline config facts. */
 export async function getVoiceHealth(): Promise<VoiceHealth> {

@@ -1,13 +1,14 @@
-import { getNotchGeometry } from "@/lib/polaris";
-import { getNotchWindowFlags } from "@/debug/commands.ts";
+import { getShellGeometry } from "@/notch/shellBridge";
 import { errorDetail, makeResult } from "@/debug/runner.ts";
 import type { FeatureCheck } from "@/debug/types.ts";
 
 /**
- * Overlay geometry and the live AppKit flags that make it float over a
- * fullscreen Space. Both come from Rust readbacks of the real window, so this is
- * the closest an automated check can get to the A15 fullscreen fix; whether it
- * *visually* floats still needs a human eye.
+ * Overlay geometry readback. Rust owns the measured, per-state frame (the shell
+ * rewrite replaced the old flat `NotchGeometry` with `ShellGeometry` and dropped
+ * the `notch_window_flags` command), so this checks that geometry resolves and
+ * reports the resting size. Whether the overlay *visually* floats over another
+ * app's fullscreen Space still needs a human eye; the activation policy is
+ * printed by Rust at startup.
  */
 export default {
   id: "notch",
@@ -15,29 +16,19 @@ export default {
   milestone: "W0",
   async run() {
     try {
-      const [geometry, flags] = await Promise.all([
-        getNotchGeometry(),
-        getNotchWindowFlags(),
-      ]);
-      const size = `${Math.round(geometry.idleWidth)}×${Math.round(geometry.idleHeight)} pt`;
-      if (flags.activationPolicy !== "accessory") {
-        return makeResult(
-          "warn",
-          `overlay ${size}, but activationPolicy=${flags.activationPolicy}; fullscreen layering may fail`,
-        );
-      }
-      if (!flags.fullScreenAuxiliary || !flags.canJoinAllSpaces) {
-        return makeResult(
-          "warn",
-          `overlay ${size}, level ${flags.level}, but fullScreenAuxiliary=${flags.fullScreenAuxiliary} canJoinAllSpaces=${flags.canJoinAllSpaces}`,
-        );
+      const geometry = await getShellGeometry();
+      const collapsed = geometry.states.find((state) => state.name === "collapsed");
+      if (!collapsed) {
+        return makeResult("fail", "geometry has no collapsed state");
       }
       return makeResult(
         "ok",
-        `overlay ${size}, level ${flags.level}, accessory; can float over fullscreen`,
+        `overlay ${Math.round(collapsed.width)}×${Math.round(collapsed.height)} pt on a ` +
+          `${Math.round(geometry.notch.screenWidth)}×${Math.round(geometry.notch.screenHeight)} display, ` +
+          `safeTop ${Math.round(geometry.notch.safeTop)}, ${geometry.states.length} states`,
       );
     } catch (error) {
-      return makeResult("fail", `overlay flags failed: ${errorDetail(error)}`);
+      return makeResult("fail", `overlay geometry failed: ${errorDetail(error)}`);
     }
   },
 } satisfies FeatureCheck;

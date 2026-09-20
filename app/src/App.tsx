@@ -1,8 +1,11 @@
-import { useEffect, useReducer, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
-import type { CaptureStatus, NotchGeometry } from "@polaris/interfaces";
+import {
+  FALLBACK_SHELL_GEOMETRY,
+  type CaptureStatus,
+  type ShellGeometry,
+} from "@polaris/interfaces";
 
-import { StageLabel } from "@/components/StageLabel";
 import { runAgentTurn, type AgentOutcome } from "@/lib/agent";
 import { executeApprovedIntent } from "@/lib/chain";
 import { speakSentence, speakTurnResult } from "@/lib/speech";
@@ -20,28 +23,9 @@ import {
   type PaymentStage,
   type TurnSession,
 } from "@/lib/turnSession";
-import {
-  getCaptureStatus,
-  getHotkeyPermission,
-  getNotchGeometry,
-  listenPolarisEvents,
-} from "@/lib/polaris";
-
-/**
- * Mirrors `notch::FALLBACK` in Rust — keep the two in step. The expanded height
- * equals the idle height on purpose: the shell only ever widens, never grows
- * down out of the hardware cutout.
- */
-const FALLBACK_GEOMETRY: NotchGeometry = {
-  idleWidth: 216,
-  idleHeight: 34,
-  expandedWidth: 216 + 2 * 110,
-  expandedHeight: 34,
-  pillTopRadius: 4.25,
-  pillBottomRadius: 8.5,
-  shellEarRadius: 6.12,
-  shellBottomRadius: 15.3,
-};
+import { getCaptureStatus, getHotkeyPermission, listenPolarisEvents } from "@/lib/polaris";
+import { ShellSurface } from "@/notch/ShellSurface";
+import { getShellGeometry } from "@/notch/shellBridge";
 
 const IDLE_STATUS: CaptureStatus = {
   state: "idle",
@@ -73,20 +57,30 @@ const PERMISSION_HINT_MS = 8000;
 /**
  * Polaris notch overlay.
  *
- * The shell is a pure function of two things: the `capture_status` event stream
- * and one explicit **turn session** (`reduceTurnSession`). A turn begins when
- * the hotkey goes down and ends once — after the answer has been spoken, or
- * after a failure label has had its dwell. In between the shell stays expanded,
- * moving `listening -> thinking -> speaking` (and, for a payment, through
- * `awaiting_approval -> signing -> submitting` before the confirmation speech)
- * with no intermediate collapse; that continuity is the whole point of modelling
- * the turn as one session instead of several independent visuals that happened
- * to overlap. F1 makes the payment stages visible and gives each its own
- * watchdog, so the notch cannot close while value is still moving.
+ * Two state machines live together here since the A5 merge, with one direction
+ * of authority between them:
+ *
+ * - The **voice chain** is one explicit turn session (`reduceTurnSession`). A
+ *   turn begins when the hotkey goes down and ends once — after the answer has
+ *   been spoken, or after a failure label has had its dwell. In between it moves
+ *   `listening -> thinking -> speaking` (and, for a payment, through
+ *   `awaiting_approval -> signing -> submitting` before the confirmation
+ *   speech) with no intermediate collapse; F1 makes those stages visible and
+ *   gives each its own watchdog, so the notch cannot close while value moves.
+ * - The **notch shell** (`ShellSurface` + `useShellState`) resolves that voice
+ *   proposal against its own hover/prompt sources and owns every pixel: one
+ *   surface, one state table. App is the bridge — it maps the turn session onto
+ *   the shell's `visual`/`voiceState`/`voiceAttention` inputs (below) and never
+ *   lets the shell derive turn state of its own. Hover/panel and the latched
+ *   double-Control prompt stay shell-only sources.
+ *
+ * The typed prompt is not a shortcut around this seam: `PromptPanel` runs the
+ * same `runAgentTurn` and, for a produced intent, the same `executeApprovedIntent`
+ * gate before anything is added to the (mock) answer.
  */
 export default function App() {
   const [status, setStatus] = useState<CaptureStatus>(IDLE_STATUS);
-  const [geometry, setGeometry] = useState<NotchGeometry>(FALLBACK_GEOMETRY);
+  const [geometry, setGeometry] = useState<ShellGeometry>(FALLBACK_SHELL_GEOMETRY);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [hotkeyTrusted, setHotkeyTrusted] = useState<boolean | null>(null);
@@ -218,9 +212,8 @@ export default function App() {
           }
           // A produced intent goes down the single A9 execution seam (approval
           // gate → chain tool) before anything is spoken. The confirmation is
-          // spoken only once an unsigned transaction exists; while Owner B's
-          // tools are `NotImplementedError` stubs, the notch says so plainly and
-          // settles instead of hanging.
+          // spoken only once the transaction is signed/submitted; a failure is
+          // announced with its real label.
           //
           // M1: bind the outcome to the turn that dispatched it. If a newer turn
           // is on screen by the time execution resolves, this result is stale and
@@ -325,7 +318,7 @@ export default function App() {
     };
 
     const refreshGeometry = () => {
-      getNotchGeometry()
+      getShellGeometry()
         .then((next) => {
           if (!disposed) setGeometry(next);
         })
@@ -364,26 +357,39 @@ export default function App() {
   const showPermissionHint =
     permissionHint && connected && hotkeyTrusted === false && session === null && !connectionError;
 
-  // The CSS treatment reuses the existing `state-*` language: capture's
-  // `recording`/`transcribing` names stay the selectors for the listening and
-  // working stages, and an errored session borrows the error treatment. The F1
-  // payment stages borrow `transcribing` on purpose: they are all "Polaris is
-  // working" and the label carries the meaning, so no new CSS state is needed.
-  const shellState = connectionError || session?.stage === "error"
-    ? "error"
-    : session?.stage === "listening"
-      ? "recording"
-      : session?.stage === "speaking"
-        ? "speaking"
-        : session !== null
-          ? "transcribing"
-          : "idle";
+  // The voice source's visual name. It reuses the shell's existing `state-*`
+  // language: capture's `recording`/`transcribing` names stay the selectors for
+  // the listening and thinking stages, the speaking stage has its own name, and
+  // a failed session borrows the error treatment. The F1 payment stages borrow
+  // `transcribing` on purpose: they are all "Polaris is working" and the label
+  // carries the meaning, so no new CSS state is needed.
+  const visual =
+    connectionError || session?.stage === "error"
+      ? "error"
+      : session?.stage === "listening"
+        ? "recording"
+        : session?.stage === "speaking"
+          ? "speaking"
+          : session !== null
+            ? "transcribing"
+            : "idle";
 
   // The shell is expanded for the whole of a live turn — including its terminal
   // stage, until the dwell collapses it — plus a connection in progress or the
   // one-time permission hint. Deriving this from `session !== null` (not from
-  // the CSS state) is what keeps `done` from collapsing a frame early.
+  // the visual) is what keeps `done`/`error` from collapsing a frame early.
   const expanded = session !== null || connectionError !== null || !connected || showPermissionHint;
+
+  // The voice source only outranks hover while it is an attention state the user
+  // must see (listening/thinking/speaking, a pending payment, a permission hint,
+  // a connection error). During a terminal dwell it only keeps the label up, so
+  // hover can still open the panel instead of being locked out for the whole
+  // dwell (MINOR-1). `isActiveStage` is exactly that attention set.
+  const voiceAttention =
+    connectionError !== null ||
+    !connected ||
+    showPermissionHint ||
+    (session !== null && isActiveStage(session.stage));
 
   // The label is the ONLY thing drawn in the left ear, so it has to stay short:
   // the ear is deliberately narrow and anything longer would be clipped (it can
@@ -418,46 +424,19 @@ export default function App() {
               : "Starting up…";
   const error = connectionError ?? status.error;
 
-  const style = {
-    "--idle-width": `${geometry.idleWidth}px`,
-    "--idle-height": `${geometry.idleHeight}px`,
-    "--expanded-width": `${geometry.expandedWidth}px`,
-    "--expanded-height": `${geometry.expandedHeight}px`,
-    "--pill-top-radius": `${geometry.pillTopRadius}px`,
-    "--pill-bottom-radius": `${geometry.pillBottomRadius}px`,
-    "--shell-ear-radius": `${geometry.shellEarRadius}px`,
-    "--shell-bottom-radius": `${geometry.shellBottomRadius}px`,
-  } as CSSProperties;
-
   return (
-    <main className="notch-stage" style={style} aria-label="Polaris voice capture">
-      <section
-        className={`notch ${expanded ? "is-expanded" : ""} state-${shellState}`}
-        aria-label={
-          expanded
-            ? `${label}. ${detail}`
-            : "Polaris ready. Hold Control and Option to record, or hold Control, Option and Space."
-        }
-      >
-        <div className="notch-content" aria-hidden={!expanded}>
-          <div className="notch-copy">
-            {/* Label only. `detail` and `error` are not drawn — the ear is too
-                narrow for them and the housing to its right cannot be used —
-                but they still reach assistive tech via the live region below. */}
-            <StageLabel label={label} />
-          </div>
-          {/* The camera housing: no pixels exist here, so it stays empty. */}
-          <span className="notch-gap" aria-hidden="true" />
-          <div className="notch-indicator" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-        </div>
-      </section>
+    <main className="notch-stage" aria-label="Polaris voice capture">
+      <ShellSurface
+        geometry={geometry}
+        visual={visual}
+        voiceState={expanded ? "compact" : "collapsed"}
+        voiceAttention={voiceAttention}
+        label={label}
+        detail={detail}
+      />
       <span
         className="sr-only"
-        role={shellState === "error" ? "alert" : "status"}
+        role={visual === "error" ? "alert" : "status"}
         aria-live="polite"
         aria-atomic="true"
       >
