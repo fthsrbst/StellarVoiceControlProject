@@ -76,6 +76,8 @@ pub enum VerifyError {
     SignedNotOneSignature,
     /// The signed envelope's body bytes differ from the unsigned input.
     BodyMismatch,
+    /// The unsigned transaction's source account is not the expected key.
+    SourceMismatch,
     /// The signature hint is not the last four bytes of the expected key.
     KeyHintMismatch,
     /// The expected key is not a valid Ed25519 point.
@@ -103,6 +105,9 @@ impl VerifyError {
             }
             Self::BodyMismatch => {
                 "the signed transaction is not the unsigned transaction".to_string()
+            }
+            Self::SourceMismatch => {
+                "the transaction source account is not the expected account".to_string()
             }
             Self::KeyHintMismatch => "the signature is not by the expected account".to_string(),
             Self::WrongPublicKey => "the expected account key is not a valid Ed25519 key".to_string(),
@@ -199,6 +204,12 @@ pub fn verify_signed(
     }
     if hint != &key[28..32] {
         return Err(VerifyError::KeyHintMismatch);
+    }
+    // The hint only binds the signature; the source account must itself be the
+    // expected key. The gate's optional `signerHint` is defence in depth, so this
+    // makes the independent-verification claim true on its own.
+    if unsigned.source != *key {
+        return Err(VerifyError::SourceMismatch);
     }
     let signature_bytes: [u8; 64] = signed[prefix_len + 12..prefix_len + 76]
         .try_into()
@@ -309,6 +320,12 @@ mod tests {
         BASE64.encode(out)
     }
 
+    /// The fixture rewritten so its source is `test_key`'s public key: the
+    /// source and the verifying key then agree, as they do in production.
+    fn owned_fixture() -> String {
+        patch_fixture(Some(test_key().verifying_key().to_bytes()), Some(1))
+    }
+
     /// Replaces the source key (offset 8) and sequence (offset 44) of the fixture
     /// and re-encodes it, so the parse-free checks can be exercised with any
     /// source/sequence combination.
@@ -343,34 +360,58 @@ mod tests {
 
     #[test]
     fn verifies_an_honest_signature() {
-        let signed = sign(FIXTURE_XDR, &test_key());
+        let unsigned = owned_fixture();
+        let signed = sign(&unsigned, &test_key());
         let hash = verify_signed(
-            FIXTURE_XDR,
+            &unsigned,
             &signed,
             &test_key().verifying_key().to_bytes(),
             PASSPHRASE,
         )
         .unwrap();
-        assert_eq!(hex::encode(hash), FIXTURE_HASH);
+        let expected = {
+            let bytes = decode_envelope(&unsigned).unwrap();
+            let parsed = parse_unsigned(&bytes).unwrap();
+            tx_hash_hex(parsed.body, PASSPHRASE)
+        };
+        assert_eq!(hex::encode(hash), expected);
     }
 
     #[test]
     fn rejects_a_wrong_owner_key() {
-        let signed = sign(FIXTURE_XDR, &test_key());
+        let unsigned = owned_fixture();
+        let signed = sign(&unsigned, &test_key());
         // Different key: the hint no longer matches.
         let other = SigningKey::from_bytes(&[9u8; 32]);
         assert_eq!(
-            verify_signed(FIXTURE_XDR, &signed, &other.verifying_key().to_bytes(), PASSPHRASE),
+            verify_signed(&unsigned, &signed, &other.verifying_key().to_bytes(), PASSPHRASE),
             Err(VerifyError::KeyHintMismatch)
         );
     }
 
     #[test]
-    fn rejects_a_wrong_passphrase() {
+    fn rejects_a_source_that_is_not_the_expected_key() {
+        // The signature verifies under the key, but the transaction's source is
+        // the fixture's original account: the source-to-key binding must reject it.
         let signed = sign(FIXTURE_XDR, &test_key());
         assert_eq!(
             verify_signed(
                 FIXTURE_XDR,
+                &signed,
+                &test_key().verifying_key().to_bytes(),
+                PASSPHRASE
+            ),
+            Err(VerifyError::SourceMismatch)
+        );
+    }
+
+    #[test]
+    fn rejects_a_wrong_passphrase() {
+        let unsigned = owned_fixture();
+        let signed = sign(&unsigned, &test_key());
+        assert_eq!(
+            verify_signed(
+                &unsigned,
                 &signed,
                 &test_key().verifying_key().to_bytes(),
                 "Public Global Stellar Network ; September 2015",
@@ -381,14 +422,15 @@ mod tests {
 
     #[test]
     fn rejects_a_tampered_signature() {
-        let signed = sign(FIXTURE_XDR, &test_key());
+        let unsigned = owned_fixture();
+        let signed = sign(&unsigned, &test_key());
         let mut bytes = decode_envelope(&signed).unwrap();
         let last = bytes.len() - 1;
         bytes[last] ^= 0x01;
         let tampered = BASE64.encode(bytes);
         assert_eq!(
             verify_signed(
-                FIXTURE_XDR,
+                &unsigned,
                 &tampered,
                 &test_key().verifying_key().to_bytes(),
                 PASSPHRASE
@@ -491,14 +533,15 @@ mod tests {
     #[test]
     fn a_patched_sequence_zero_envelope_is_parseable_and_still_verifies() {
         // The self-test requires sequence 0; the parse-free reader must see it.
-        let patched = patch_fixture(Some(OWNER_KEY), Some(0));
+        let key = test_key();
+        let source = key.verifying_key().to_bytes();
+        let patched = patch_fixture(Some(source), Some(0));
         let bytes = decode_envelope(&patched).unwrap();
         let parsed = parse_unsigned(&bytes).unwrap();
         assert_eq!(parsed.sequence, 0);
-        assert_eq!(parsed.source, OWNER_KEY);
+        assert_eq!(parsed.source, source);
 
         let signed = {
-            let key = test_key();
             let hash = tx_hash(parsed.body, PASSPHRASE);
             let signature = key.sign(&hash);
             let hint = &key.verifying_key().to_bytes()[28..32];
@@ -510,7 +553,7 @@ mod tests {
             out.extend_from_slice(&signature.to_bytes());
             BASE64.encode(out)
         };
-        assert!(verify_signed(&patched, &signed, &test_key().verifying_key().to_bytes(), PASSPHRASE).is_ok());
+        assert!(verify_signed(&patched, &signed, &source, PASSPHRASE).is_ok());
     }
 
     #[test]

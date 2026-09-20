@@ -57,6 +57,38 @@ fn base32_decode(input: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Test-only inverse of [`decode_public_key`], so bridge tests can build an
+/// address that matches a locally generated keypair.
+#[cfg(test)]
+pub(crate) fn encode_public_key(key: &[u8; 32]) -> String {
+    let mut payload = Vec::with_capacity(35);
+    payload.push(PUBLIC_KEY_VERSION);
+    payload.extend_from_slice(key);
+    payload.extend_from_slice(&crc16_xmodem(&payload).to_le_bytes());
+    base32_encode(&payload)
+}
+
+/// RFC 4648 base32 (`A-Z2-7`) without padding. Test-only counterpart of
+/// [`base32_decode`].
+#[cfg(test)]
+fn base32_encode(data: &[u8]) -> String {
+    const ALPHABET: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+    let mut out = String::with_capacity(data.len().div_ceil(5) * 8);
+    let (mut buffer, mut bits) = (0u32, 0u32);
+    for byte in data {
+        buffer = (buffer << 8) | u32::from(*byte);
+        bits += 8;
+        while bits >= 5 {
+            bits -= 5;
+            out.push(ALPHABET[((buffer >> bits) & 0x1f) as usize] as char);
+        }
+    }
+    if bits > 0 {
+        out.push(ALPHABET[((buffer << (5 - bits)) & 0x1f) as usize] as char);
+    }
+    out
+}
+
 /// CRC16-XModem (poly `0x1021`, init 0), the checksum Stellar StrKeys use.
 fn crc16_xmodem(data: &[u8]) -> u16 {
     let mut crc: u16 = 0;
@@ -86,6 +118,12 @@ mod tests {
     fn decodes_the_two_fixture_addresses_to_their_known_keys() {
         assert_eq!(hex::encode(decode_public_key(OWNER).unwrap()), OWNER_KEY);
         assert_eq!(hex::encode(decode_public_key(ACC2).unwrap()), ACC2_KEY);
+    }
+
+    #[test]
+    fn encodes_a_known_key_back_to_its_address() {
+        let key = decode_public_key(OWNER).unwrap();
+        assert_eq!(encode_public_key(&key), OWNER);
     }
 
     #[test]
