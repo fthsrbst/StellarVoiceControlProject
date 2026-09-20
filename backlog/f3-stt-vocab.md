@@ -37,3 +37,8 @@ Real mic run on the owner's Mac (the Russian/hallucination case was intermittent
 - **Live probe** (`npm run stt:probe`, 27 calls): all 6 speech samples `ok` (`Send 10 XLM to acc2.` etc.); junk clips 0.7/1.0/1.5 s come back as `Recipients are acc2.`/`Altyazı M.K.`/`Raric…` — **no Turkish vocabulary echo**; the echo cases are flagged `prompt-echo`, the rest are caught by the agent rule.
 - **Note:** scope named `agent/src/capabilities.ts`, which does not exist on this branch (it lands on `integration/wallet`); the equivalent system prompt is `agent/src/prompt.ts`, edited there. `POLARIS_STT_LANGUAGE`/`_PROMPT` docs refreshed in `.env.example`.
 - **Human-verify:** real-mic run on the owner's Mac (English-forced short clip), `POLARIS_STT_PROMPT=off`, and `POLARIS_STT_ALLOWED_LANGS` live. No blockers.
+
+## F3-agent — rule ported into the capabilities prompt (`integration/wallet`)
+- `agent/src/capabilities.ts`: unintelligible/empty-transcript behaviour bullet (`"[en] Sorry, I didn't catch that."` / `"[tr] Anlayamadım."`, no advice/lists) + 120-char spoken cap + a no-tool few-shot; every existing capability/alias/few-shot kept.
+- `agent/src/prompt.test.ts` re-pointed at the composed `POLARIS_SYSTEM_PROMPT` (adds the `[en]` tag and Turkish fallback); no test deleted — `capabilities.test.ts` does not cover this rule.
+- Verified: `npm run check` clean; agent **182 pass / 0 fail**, app **354 pass / 0 fail**; live `e2e-prompt-eval` **33/33 = 100 %** (incl. two unintelligible inputs). Human-verify: real mic unchanged.

@@ -73,6 +73,9 @@ const cases = [
   { u: "bugün hava nasıl?" },
   { u: "what is Stellar?" },
   { u: "merhaba" },
+  // Unintelligible input: no intent, one short reply (never a lecture).
+  { u: "Recipients, cüzdan, hizmet, bakiye." },
+  { u: "asdf qwer tqzxc hmm" },
 ];
 
 function check(c, result) {
