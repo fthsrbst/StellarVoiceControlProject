@@ -15,6 +15,7 @@
 | 2026-09-19 | **A0 — harness**: global hotkey (press/release) + microphone capture to WAV + wire both into the existing log pane; delete the temporary `dev_self_test` command | Owner A | open | `backlog/2026-09-19-monorepo-skeleton.md` | P0 |
 | 2026-09-19 | Owner B: fill in `stellar/` (anchor SEP-10/38/6 client, `sendPayment` tool) — stubs throw `NotImplementedError` today | Owner B | open | `backlog/2026-09-19-monorepo-skeleton.md` | P0 |
 | 2026-09-19 | **TTS voice**: no professional Turkish voice on Fish Audio; decide spoken-output language. Also: expose a user-facing male/female voice choice (Sarah / Ethan) in a later milestone | Owner A | open | `backlog/2026-09-19-tts-voice-selection.md` | P1 |
+| 2026-09-20 | **W8a — P2P escrow contract** `polaris_p2p_escrow`: built + 20 tests + testnet deploy `CBMXLTXS76S72SIPLVMCQOSS6SN2CR4V3Q73GZPRA4GRIBEM7RE5OLJW`; TS client + order-book UI pending | Worker (opencode) | open | `backlog/w8a-p2p-escrow.md` | P1 |
 
 ## Completed Tasks (Archive)
 
