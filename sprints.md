@@ -126,6 +126,9 @@
 - [x] Tests: `parsePanelRoute` (app) + panel registry (Rust, no window); docs `docs/ui-panels.md` (2026-09-20).
 - [x] Independent-review corrections applied: UI promise rejections caught, single `PanelName` source, failed-`hide()` fallback, create-race collision focuses the existing window (+1 Rust test) (2026-09-20, report §8).
 - **Accept:** `npm run check` / `npm test -w @polaris/app` / `npm run build -w @polaris/app` / `cargo test` / `cargo clippy -D warnings` green. Tray icon, focusable windows and close-keeps-app-alive are **unverified** — need a human on a real Mac (`backlog/w0-panel-windows.md`).
+#### W0d — Shared panel transaction pipeline 🔲
+- [x] `app/src/lib/txPipeline.ts` (`runTx`/`runTxSequence`, injectable approver/signer/clock, never throws) + `useTxRun.ts` hook + `docs/ui-panels.md` §10 (2026-09-20, `feat/w0d-tx-pipeline`).
+- [ ] **Accept:** `npm run check` / `npm test -w @polaris/app` (173 pass) / `npm run build -w @polaris/app` green; real Touch ID + Freighter round trip from a panel is **unverified** (needs a human). Trace: `backlog/w0d-tx-pipeline.md`
 #### W3 — Touch ID approval gate (Rust) 🔲
 - [x] `biometric.rs` (`LAContext` device-owner auth, reason sanitising), `approval.rs` (one-request state machine, hash binding, webview commands, in-process `take_authorized`), `health.rs` (Debug health + self-test) — 2026-09-20, `feat/w3-touchid-gate`
 - [x] Independent-review fixes: `WalletOnly` unreachable from the webview (in-process `begin_wallet_only` only), `{kind,message}` error contract + snapshot returns (W2), panic-safe `in_flight` guard — 2026-09-20
