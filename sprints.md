@@ -189,6 +189,7 @@
   - SEP-6 client merged ([PR #11](https://github.com/n0tnow/StellarVoiceControlProject/pull/11)); voice wiring pending (Owner A, not on the chain-lane critical path)
   - [x] (2026-09-20, branch `feat/w5b-anchor-flows`) **W5b.** App-side anchor `Signer` (seq-0 wallet-only `bridge_sign_challenge`, else Touch ID pipeline) + `createAnchorSession`, voice `deposit`/`withdraw` intents, Anchor panel + Debug check; live Touch ID/Freighter needs a human — `backlog/w5b-anchor-flows.md`
   - [ ] (2026-09-20, branch `feat/w5a-anchor-signing`) **W5a (Rust).** Wallet-only SEP-10 challenge signing: `bridge_sign_challenge` + `anchor_signing_health`, seq-0/owner-source integrity checks (op types not parsed), parser hardened against crafted XDR (no panic), generalised signature-list parsing; live anchor challenge still needs a human — see `backlog/w5a-anchor-signing.md`
+  - [x] (2026-09-20, branch `feat/w5b-anchor-flows`) **W5b-fix.** Review corrections: the real pipeline captures the signed XDR (fake-bridge tests), voice `deposit`/`withdraw` drive `runAnchorIntent` on the panel `AnchorSession`, stricter missing-command check, directional step mapping, configured passphrase — `backlog/w5b-anchor-flows.md`
 - [ ] Protocol integration: Soroswap swap OR DeFindex vault (pick ONE via testnet spike, do not attempt both)
 - [ ] Approval card UI polished (Stellar Design System / shadcn), explorer links on card
 - [ ] (optional if time) MPP pay-per-command session
@@ -223,6 +224,7 @@
 - [ ] **T6.** Demo runbook completed after T1/T2/T5 (`docs/demo-runbook.md`)
 - [x] (2026-09-20, `integration/wallet`) **Merge-fix.** Repaired the naive five-branch merge (interfaces/agent/app/Rust); all checks, tests, build and clippy green — `backlog/merge-fix-integration.md`
 - [x] (2026-09-20, `integration/wallet`) **MERGE-FIX2.** Fixed the W5a-broken Rust test build (`challenge` field in two test initializers) and re-scanned the last three merges for keep-both damage (none found); cargo test/clippy, `npm run check`, app/agent tests green — `backlog/merge-fix-integration.md`
+- [x] (2026-09-20, `integration/wallet`) **MERGE-FIX3.** Merged the reviewed `feat/w5a-anchor-signing` and `feat/w5b-anchor-flows` fix branches into integration, resolving the `verify.rs` (panic-free parser + `SourceMismatch`) and `chain.ts` (W6b schedules + W5b `runAnchorIntent`) conflicts; all checks/tests/build/cargo test/clippy green — `backlog/merge-fix-integration.md`
 - [x] (2026-09-20, `integration/wallet`) **MERGE-MAIN.** Merged Fatih's notch shell (origin/main #23/#24) into the pipeline branch: one App bridge over our turn session + his shell machine, typed prompt through `executeApprovedIntent`, debug check ported to `getShellGeometry`, `window_size` BUG-1 fix; all checks/tests/build/clippy green — `backlog/merge-main-notch-shell.md`
 - [x] (2026-09-20, W6a-fix) Review fixes: per-step resequencing in `runTxSequence` (B1), mode-driven plan (M2), alias union + read-failed (M3), honest wording + double-click guard (N4–N8) — `backlog/w6a-security-panel.md`
 - [ ] **T6.** Demo runbook completed after T1/T2/T5 (`docs/demo-runbook.md`)

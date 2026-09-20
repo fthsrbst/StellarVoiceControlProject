@@ -220,6 +220,14 @@ export async function executeApprovedIntent(
   // W6b: the schedule tools live in their own module (RPC + guard client wiring);
   // both adapt a validated `Intent` to the chain tool's unsigned XDR + summary.
   const { cancelChainTool, scheduleChainTool } = await import("@/lib/schedulesLive");
+  // W5b/M1: deposit/withdraw are multi-step anchor flows, not one tool XDR.
+  // Drive the same `AnchorSession` the panel uses, so the SEP-10 challenge is
+  // signed wallet-only and every value-moving step goes through the Touch ID
+  // pipeline. This also keeps a sequence-0 challenge out of `bridge_sign`.
+  if (intent.kind === "deposit" || intent.kind === "withdraw") {
+    const { runAnchorIntent } = await import("@/lib/anchor");
+    return runAnchorIntent(intent);
+  }
   const chainTools = {
     send: sendPayment,
     swap,

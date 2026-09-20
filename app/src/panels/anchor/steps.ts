@@ -84,17 +84,20 @@ export function anchorFlowReducer(
 /**
  * Best-effort mapping from an explain record's `step` label to the panel step it
  * belongs to. The flow advances its steps explicitly; this only lets a step tick
- * as soon as the session narrates it.
+ * as soon as the session narrates it. A `sep6.*` order explain belongs to the
+ * order step on a deposit but to the waiting step on a withdraw; a plain
+ * `horizon.*` read (e.g. a balance check) belongs to no step.
  */
-export function stepForExplain(step: string): AnchorStepId | undefined {
+export function stepForExplain(
+  step: string,
+  direction: "deposit" | "withdraw" = "deposit",
+): AnchorStepId | undefined {
   if (step.startsWith("sep10")) return "auth";
   if (step === "sep1" || step.startsWith("sep1.")) return "discover";
   if (step === "preflight.trustline") return "trustline";
   if (step.startsWith("preflight")) return "account";
-  if (step.startsWith("sep12") || step.startsWith("sep38") || step.startsWith("sep6")) {
-    return "deposit";
-  }
-  if (step.startsWith("horizon")) return "completed";
+  if (step.startsWith("sep12") || step.startsWith("sep38")) return "deposit";
+  if (step.startsWith("sep6")) return direction === "withdraw" ? "waiting" : "deposit";
   return undefined;
 }
 
