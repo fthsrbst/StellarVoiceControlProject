@@ -221,6 +221,7 @@
 - [x] (2026-09-20, branch `feat/w6b-schedules`) **W6b.** Scheduled payments: voice intents `schedule_payment`/`cancel_schedule` (tr/en, explicit device zone) + "Upcoming payments" panel (Cancel / New schedule / keeper strip) + `schedules` Debug check — see `backlog/w6b-schedules.md`
 - [ ] **T6.** Demo runbook completed after T1/T2/T5 (`docs/demo-runbook.md`)
 - [x] (2026-09-20, `integration/wallet`) **Merge-fix.** Repaired the naive five-branch merge (interfaces/agent/app/Rust); all checks, tests, build and clippy green — `backlog/merge-fix-integration.md`
+- [x] (2026-09-20, `integration/wallet`) **MERGE-FIX2.** Fixed the W5a-broken Rust test build (`challenge` field in two test initializers) and re-scanned the last three merges for keep-both damage (none found); cargo test/clippy, `npm run check`, app/agent tests green — `backlog/merge-fix-integration.md`
 
 ## Milestone 4 — Delivery / Presentation 🔲
 > Deadline: 20 Sep 12:00. Bonuses (passkey wallet, P2P escrow, developer mode) ONLY after M4 items are done.
