@@ -225,3 +225,73 @@ From `backlog/2026-09-19-slice-gap-analysis.md` §A.1. Tracked, **not yet fixed*
   shared `ChainTool`. The unmerged `docs/rule-types-and-decisions` branch adds `withdraw` (plus
   `set_rule` / `schedule` / `cancel_schedule` / `p2p_offer`, `Rule`, `Schedule`, `ScheduleDraft`,
   `GuardError`, and events `anchor_step` / `approval_required`).
+
+## 8. Approval gate (step W3)
+
+> Mirrors `interfaces/src/index.ts` §8 and the W2 approval-card client
+> (`app/src/lib/approval.ts`). The Rust implementation is
+> `app/src-tauri/src/approval.rs`.
+
+Every value-moving action needs one human approval before its unsigned XDR may
+leave the gate. The webview never receives the XDR: `ApprovalSnapshot`,
+`ApprovalStatus` and the `approval_request` / `approval_result` events carry only
+the `payloadHash`, the decoded `summary` and the `intent`.
+
+```ts
+export type ApprovalMode = "touch_id" | "wallet_only";
+export type ApprovalState = "pending" | "authorized" | "denied" | "expired" | "consumed";
+
+export interface ApprovalRequestInput {
+  id?: string;              // assigned by the gate; the webview may omit it
+  payloadHash: string;      // lowercase hex SHA-256 of the UTF-8 bytes of unsignedXdr
+  unsignedXdr: string;      // base64, unsigned
+  summary: ChainToolResult["summary"];
+  intent: Intent;
+  mode?: ApprovalMode;      // defaults to "touch_id"
+  origin?: string;          // reserved for W5; NOT an authorization signal
+}
+
+export interface ApprovalSnapshot {
+  id: string;
+  payloadHash: string;
+  summary: ChainToolResult["summary"];
+  intent: Intent;
+  mode: ApprovalMode;
+  state: ApprovalState;
+  expiresAtMs: number;
+}
+
+export interface ApprovalStatus { id: string; state: ApprovalState; reason?: string; }
+
+export type ApprovalErrorKind =
+  | "cancelled" | "failed" | "unavailable" | "timeout" | "expired" | "notPending";
+
+export interface ApprovalCommandError { kind: ApprovalErrorKind; message: string; }
+```
+
+### Command contract
+
+| Command | Input | Success | Failure |
+|---|---|---|---|
+| `approval_begin` | `ApprovalRequestInput` | `id: string` | `ApprovalCommandError` |
+| `approval_authorize` | `{ id: string }` | `ApprovalSnapshot` (state `authorized`) | `ApprovalCommandError` |
+| `approval_deny` | `{ id: string }` | `ApprovalSnapshot` (state `denied`) | `ApprovalCommandError` |
+| `approval_status` | `{ id: string }` | `ApprovalStatus \| null` | — |
+| `approval_current` | — | `ApprovalSnapshot \| null` | — |
+| `biometric_health` | — | `FeatureHealth` | — |
+| `biometric_selftest` | — | `FeatureHealth` | — |
+
+- Errors serialise as `{ kind, message }` (camelCase `kind`). User cancel →
+  `cancelled`, 60 s auth timeout → `timeout`, missing biometry/passcode →
+  `unavailable`, elapsed TTL → `expired`, unknown/wrong-state request →
+  `notPending`, everything else → `failed` (fail-closed).
+- `take_authorized(id)` is **in-process Rust only** (`pub(crate)`) and is never a
+  Tauri command; the Freighter bridge (W4) calls it to release the XDR. It
+  returns the payload once, then marks the request `consumed`.
+- **`wallet_only` is unreachable from the webview.** `approval_begin` rejects it
+  unconditionally; the only way to create such a request is the in-process
+  `begin_wallet_only`, and the webview `approval_authorize` refuses to authorize
+  it. The anchor milestone (W5) must land the Rust-side anchor check before any
+  `wallet_only` request is released; **W4b must not enable `wallet_only`.**
+- `FeatureHealth` / `HealthStatus` (mirrors `index.ts` §9) remain the Debug-panel
+  contract.

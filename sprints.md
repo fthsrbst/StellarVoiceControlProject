@@ -101,6 +101,11 @@
 - [ ] Approval card + Touch ID gate → signed → testnet tx (M2 slice complete).
 - **Accept:** "send 10 USDC to <alias>" end-to-end, Touch ID approved, tx visible on explorer.
 
+#### W3 — Touch ID approval gate (Rust) 🔲
+- [x] `biometric.rs` (`LAContext` device-owner auth, reason sanitising), `approval.rs` (one-request state machine, hash binding, webview commands, in-process `take_authorized`), `health.rs` (Debug health + self-test) — 2026-09-20, `feat/w3-touchid-gate`
+- [x] Independent-review fixes: `WalletOnly` unreachable from the webview (in-process `begin_wallet_only` only), `{kind,message}` error contract + snapshot returns (W2), panic-safe `in_flight` guard — 2026-09-20
+- [ ] **Accept:** the real Touch ID prompt, the device-password fallback and cancel verified by a human on a real Mac (**not verified** — needs a human). Trace: `backlog/w3-touch-id-gate.md`
+
 ## Milestone 2b — Minimal Integration Slice (chain lane first) 🔲
 > Source: `backlog/2026-09-19-slice-gap-analysis.md` §G.3 (S1–S10), adapted to decisions D1/D2.
 > Integration between the UI lane and the chain lane is **paused until both sides are done**.
