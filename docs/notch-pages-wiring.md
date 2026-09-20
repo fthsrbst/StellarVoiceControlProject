@@ -13,6 +13,16 @@ is: `setNotchPage("history" | "tasks" | "rules" | "wallet")` from
 | Rules | `notch/pages/RulesPage.tsx` | `lib/guardStateLive.ts`: `loadSecurityState`; `lib/guardState.ts`: `stateLines`, `profileModeOf`, `ruleFromFields` (mirror `SecurityPanel`). |
 | Wallet | `notch/pages/WalletPage.tsx` | `lib/stellarConfig.ts`: `getStellarConfig` (owner/network, `stellar_config`); `lib/history.ts`: `fetchOwnerAccount`/`fetchOwnerPayments`; `panels/wallet/walletModel.ts`: `deriveWalletView` (mirror `WalletPanel`). |
 
+Tasks page (NW3): `notch/data/useTasksData.ts` adapts `loadUpcoming` →
+`toScheduleRows` → `TaskRow` (amount/recipient, local + UTC next run,
+recurrence, runs left, status) and reuses `keeperStatus` for the keeper hint. It
+is demo (mock) only outside Tauri or without an owner address; a real read
+failure shows the error + Retry. Cancel is the single value-moving action and
+goes through `cancelChainTool` + `useTxRun`/`txPipeline`; demo rows (no numeric
+id) are not cancellable. The empty state points at the voice example because
+schedule creation stays a voice action. Covered by the existing `schedules`
+Debug check (same data source).
+
 Notes:
 
 - The existing panels are the reference implementations; reuse their loaders and
