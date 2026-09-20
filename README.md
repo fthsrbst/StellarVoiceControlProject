@@ -1,6 +1,5 @@
 # Autonomy
 
-## Download Autonomy
 ### macOS
 
 [![Download for macOS](https://img.shields.io/badge/Download_for_macOS-Apple_Silicon-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/n0tnow/StellarVoiceControlProject/releases/download/v0.2.1/Autonomy_0.2.1_aarch64.dmg)
