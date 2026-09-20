@@ -27,13 +27,14 @@ import { anchor, TESTNET } from "@polaris/stellar";
 import type { ChainToolResult, Intent } from "@polaris/interfaces";
 import type { ExecutionOutcome } from "@polaris/agent";
 
-import { runTx, type TxRunMeta } from "./txPipeline.ts";
+import { runTx, type TxPipelineDeps, type TxRunMeta } from "./txPipeline.ts";
 import {
   defaultSigningDeps,
   isBridgeSigned,
   signAndSubmit,
   type BridgeOutcome,
   type SigningDeps,
+  type SubmittedOutcome,
 } from "./signing.ts";
 
 /** Thrown when the Rust `bridge_sign_challenge` command is not on this build. */
@@ -46,12 +47,15 @@ export class AnchorSigningUnavailableError extends Error {
 
 /**
  * True when a rejected `invoke` means "no such command". Tauri reports a missing
- * command as a string ("Command x not found"), so this is deliberately textual
- * and only used to turn that one case into a clear, feature-detectable error.
+ * command as the whole message ("Command x not found"), so the match is anchored:
+ * a genuine command that failed with "… not found" inside a longer message must
+ * not be mislabelled as the command being absent.
  */
 export function isMissingCommandError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /not found|unknown command|no such command/i.test(message);
+  const message = (error instanceof Error ? error.message : String(error)).trim();
+  return /^(?:command\s+\S+\s+not found|unknown command(?:\s+\S+)?|no such command(?:\s+\S+)?)[.!]?$/i.test(
+    message,
+  );
 }
 
 /** The facts decoded from one anchor envelope before it is signed. */
@@ -123,7 +127,25 @@ export interface AnchorSignerDeps {
   /** Wallet-only challenge signing (`bridge_sign_challenge`). */
   signChallenge: (xdr: string) => Promise<BridgeOutcome>;
   /** Touch ID + Freighter signing of a non-challenge envelope; returns the signed XDR. */
-  signViaPipeline: (result: ChainToolResult, meta: TxRunMeta) => Promise<string>;
+  signViaPipeline: (
+    result: ChainToolResult,
+    meta: TxRunMeta,
+    networkPassphrase?: string,
+  ) => Promise<string>;
+  /** Test seams for the real [`defaultSignViaPipeline`]; production passes none. */
+  pipeline?: AnchorPipelineDeps;
+}
+
+/** Test seams for the real [`defaultSignViaPipeline`]. Production passes none of these. */
+export interface AnchorPipelineDeps {
+  /** The Touch ID gate; the real gate is resolved by `runTx` when omitted. */
+  approver?: TxPipelineDeps["approver"];
+  /** Injectable clock; defaults to `Date.now`. */
+  now?: () => number;
+  /** The Freighter bridge invoke; defaults to the real Tauri command. */
+  invoke?: SigningDeps["invoke"];
+  /** Override the inner signer (tests only); defaults to the real `signAndSubmit` capture. */
+  sign?: TxPipelineDeps["sign"];
 }
 
 /** Default owner reader: the non-secret `stellar_config` command. */
@@ -156,20 +178,34 @@ async function defaultSignChallenge(xdr: string): Promise<BridgeOutcome> {
  * with a pure capture, because an `AnchorSession` owns submission for the
  * transactions it builds (the trustline in `preflight`, the payment in
  * `payWithdrawal`) and a second Horizon call here would double-submit.
+ *
+ * The capture assigns the signed envelope before returning, and the hash is
+ * computed with the session's own `networkPassphrase`, so it matches the blob
+ * Rust hashed for the same envelope.
  */
-async function defaultSignViaPipeline(result: ChainToolResult, meta: TxRunMeta): Promise<string> {
+export async function defaultSignViaPipeline(
+  result: ChainToolResult,
+  meta: TxRunMeta,
+  networkPassphrase: string = TESTNET.networkPassphrase,
+  pipeline: AnchorPipelineDeps = {},
+): Promise<string> {
   let signed: string | undefined;
   const capture: SigningDeps = {
     ...defaultSigningDeps,
-    submit: async (signedXdr: string) => ({
-      hash: anchorTxHash(signedXdr),
-      // No network call and no `tx_submitted` emit: the session will submit.
-      explorerUrl: "",
-    }),
+    invoke: pipeline.invoke ?? defaultSigningDeps.invoke,
+    submit: async (signedXdr: string) => {
+      // B1: the session submits this envelope, so capture it here instead.
+      signed = signedXdr;
+      return { hash: anchorTxHash(signedXdr, networkPassphrase), explorerUrl: "" };
+    },
     emitSubmitted: () => {},
   };
-  const sign = (outcome: ExecutionOutcome) => signAndSubmit(outcome, capture);
-  const run = await runTx(result, meta, { sign });
+  const sign = pipeline.sign ?? ((outcome: ExecutionOutcome) => signAndSubmit(outcome, capture));
+  const run = await runTx(result, meta, {
+    ...(pipeline.approver ? { approver: pipeline.approver } : {}),
+    now: pipeline.now ?? (() => Date.now()),
+    sign,
+  });
   if (run.status !== "submitted" || !signed) {
     const detail = run.status === "submitted" ? "no signed envelope was produced" : run.detail;
     throw new Error(detail || "the anchor transaction was not approved");
@@ -185,7 +221,10 @@ async function defaultSignViaPipeline(result: ChainToolResult, meta: TxRunMeta):
 export function createAnchorSigner(overrides: Partial<AnchorSignerDeps> = {}): anchor.Signer {
   const owner = overrides.owner ?? defaultOwner;
   const signChallenge = overrides.signChallenge ?? defaultSignChallenge;
-  const signViaPipeline = overrides.signViaPipeline ?? defaultSignViaPipeline;
+  const signViaPipeline =
+    overrides.signViaPipeline ??
+    ((result: ChainToolResult, meta: TxRunMeta, networkPassphrase?: string) =>
+      defaultSignViaPipeline(result, meta, networkPassphrase ?? TESTNET.networkPassphrase, overrides.pipeline));
   return {
     publicKey: () => owner(),
     async signTransaction(xdr, opts) {
@@ -198,10 +237,11 @@ export function createAnchorSigner(overrides: Partial<AnchorSignerDeps> = {}): a
         }
         return outcome.signedXdr;
       }
-      return signViaPipeline({ unsignedXdr: xdr, summary: facts.summary }, {
-        intent: facts.intent,
-        label: facts.summary.title,
-      });
+      return signViaPipeline(
+        { unsignedXdr: xdr, summary: facts.summary },
+        { intent: facts.intent, label: facts.summary.title },
+        passphrase,
+      );
     },
   };
 }
@@ -218,4 +258,74 @@ export function createAnchorSession(
     ...options,
     signer: options.signer ?? createAnchorSigner(),
   });
+}
+
+/** The `AnchorSession` methods the voice deposit/withdraw drives (structural, so tests can fake it). */
+export interface AnchorFlowSession {
+  discover(): Promise<unknown>;
+  login(): Promise<unknown>;
+  prepareAccount(): Promise<unknown>;
+  startDeposit(amountFiat: string): Promise<unknown>;
+  startWithdraw(amountAsset: string): Promise<unknown>;
+  payWithdrawal(amountAsset: string): Promise<{ data: { hash: string; explorerUrl: string } }>;
+}
+
+/** Injectable seams of [`runAnchorIntent`]. */
+export interface AnchorFlowDeps {
+  /** The session to drive; default is the shell-configured one (panel signer routing). */
+  session?: AnchorFlowSession;
+}
+
+/**
+ * Voice deposit/withdraw (M1): drives the same `AnchorSession` flow the panel
+ * uses, so the voice path follows the panel's signer routing instead of pushing
+ * a raw tool XDR into `signAndSubmit`. Auth is the SEP-10 challenge (sequence
+ * 0), signed wallet-only by `bridge_sign_challenge`; the trustline and the
+ * withdrawal payment move value, so the session's signer routes them through the
+ * Touch ID + Freighter pipeline. Never throws: a failure at any step is a
+ * labelled outcome.
+ *
+ * A deposit stops at the anchor's bank instructions (the bank transfer is a
+ * human step); a withdrawal pays on-chain and returns the transaction hash.
+ */
+export async function runAnchorIntent(
+  intent: Intent,
+  deps: AnchorFlowDeps = {},
+): Promise<SubmittedOutcome> {
+  if (intent.kind !== "deposit" && intent.kind !== "withdraw") {
+    return {
+      status: "unsupported",
+      intent,
+      label: "Not supported",
+      detail: `an anchor flow needs a deposit/withdraw intent, got "${intent.kind}"`,
+    };
+  }
+  try {
+    const session = deps.session ?? anchor.getAnchorSession();
+    await session.discover();
+    await session.login();
+    await session.prepareAccount();
+    if (intent.kind === "withdraw") {
+      await session.startWithdraw(intent.amount);
+      const paid = await session.payWithdrawal(intent.amount);
+      return {
+        status: "executed",
+        intent,
+        txHash: paid.data.hash,
+        explorerUrl: paid.data.explorerUrl,
+      };
+    }
+    await session.startDeposit(intent.amount);
+    return {
+      status: "executed",
+      intent,
+      label: "Deposit started",
+      detail: "Follow the anchor's bank transfer instructions to complete the deposit.",
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    const label =
+      error instanceof AnchorSigningUnavailableError ? "Anchor login unavailable" : "Anchor step failed";
+    return { status: "failed", intent, label, detail };
+  }
 }

@@ -100,6 +100,8 @@ export function useAnchorFlow(): AnchorFlow {
   const amountRef = useRef("");
   const narrateRef = useRef(narrate);
   narrateRef.current = narrate;
+  const directionRef = useRef(direction);
+  directionRef.current = direction;
 
   const session = useCallback((): anchor.AnchorSession => {
     sessionRef.current ??= createAnchorSession();
@@ -110,7 +112,7 @@ export function useAnchorFlow(): AnchorFlow {
     const s = session();
     return s.explain.subscribe((record) => {
       dispatch({ type: "log", line: { step: record.step, what: record.what, why: record.why, at: record.at } });
-      const id = stepForExplain(record.step);
+      const id = stepForExplain(record.step, directionRef.current);
       if (id) dispatch({ type: "step", id, status: "done" });
       if (narrateRef.current) speakSentence(anchor.narrate(record));
     });
@@ -157,8 +159,12 @@ export function useAnchorFlow(): AnchorFlow {
         const found = direction === "deposit" ? await s.quoteDeposit(amount) : await s.quoteWithdraw(amount);
         setQuote(quoteLines(found.data));
         await runStep("auth", () => s.login());
-        await runStep("account", () => s.prepareAccount());
-        dispatch({ type: "step", id: "trustline", status: "done" });
+        const pre = await runStep("account", () => s.prepareAccount());
+        // The trustline step is done only when one was actually added; an account
+        // that already trusts the asset never reaches that step.
+        if (pre.data.actions.includes("trustline_created")) {
+          dispatch({ type: "step", id: "trustline", status: "done" });
+        }
         const order =
           direction === "deposit"
             ? await runStep("deposit", () => s.startDeposit(amount))

@@ -183,6 +183,14 @@ export async function executeApprovedIntent(
   const { depositTry, guardPolicy, sendPayment, swap, withdrawTry } = await import(
     "@polaris/stellar"
   );
+  // W5b/M1: deposit/withdraw are multi-step anchor flows, not one tool XDR.
+  // Drive the same `AnchorSession` the panel uses, so the SEP-10 challenge is
+  // signed wallet-only and every value-moving step goes through the Touch ID
+  // pipeline. This also keeps a sequence-0 challenge out of `bridge_sign`.
+  if (intent.kind === "deposit" || intent.kind === "withdraw") {
+    const { runAnchorIntent } = await import("@/lib/anchor");
+    return runAnchorIntent(intent);
+  }
   const chainTools = {
     send: sendPayment,
     swap,

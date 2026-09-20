@@ -40,7 +40,8 @@ test("stepForExplain maps the anchor client's labels onto the panel steps", () =
   assert.equal(stepForExplain("preflight.ready"), "account");
   assert.equal(stepForExplain("preflight.trustline"), "trustline");
   assert.equal(stepForExplain("sep6.status.completed"), "deposit");
-  assert.equal(stepForExplain("horizon.balance"), "completed");
+  assert.equal(stepForExplain("sep6.status.completed", "withdraw"), "waiting");
+  assert.equal(stepForExplain("horizon.balance"), undefined);
   assert.equal(stepForExplain("unknown.step"), undefined);
 });
 
