@@ -1,7 +1,5 @@
 # Autonomy
 
-**Project link: **
-
 ## Download Autonomy
 ### macOS
 
