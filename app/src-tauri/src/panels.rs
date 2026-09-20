@@ -24,6 +24,7 @@ pub const SCHEDULES: &str = "schedules";
 pub const SUGGESTIONS: &str = "suggestions";
 pub const ANCHOR: &str = "anchor";
 pub const P2P: &str = "p2p";
+pub const PRIVACY: &str = "privacy";
 pub const SETTINGS: &str = "settings";
 pub const DEBUG: &str = "debug";
 
@@ -122,6 +123,16 @@ pub const PANELS: &[PanelSpec] = &[
         route: "#/p2p",
         width: 460.0,
         height: 640.0,
+        always_on_top: false,
+        resizable: true,
+    },
+    PanelSpec {
+        name: PRIVACY,
+        label: "panel-privacy",
+        title: "Polaris Privacy",
+        route: "#/privacy",
+        width: 480.0,
+        height: 680.0,
         always_on_top: false,
         resizable: true,
     },
@@ -307,6 +318,7 @@ mod tests {
                 SUGGESTIONS,
                 ANCHOR,
                 P2P,
+                PRIVACY,
                 SETTINGS,
                 DEBUG,
             ]
@@ -322,6 +334,7 @@ mod tests {
         assert_eq!(resolve(SUGGESTIONS).unwrap().name, SUGGESTIONS);
         assert_eq!(resolve(ANCHOR).unwrap().name, ANCHOR);
         assert_eq!(resolve(P2P).unwrap().name, P2P);
+        assert_eq!(resolve(PRIVACY).unwrap().name, PRIVACY);
         assert_eq!(resolve(SETTINGS).unwrap().name, SETTINGS);
         assert_eq!(resolve(DEBUG).unwrap().name, DEBUG);
     }
@@ -391,6 +404,7 @@ mod tests {
         );
         assert_eq!(panel_url(resolve(ANCHOR).unwrap()), "index.html#/anchor");
         assert_eq!(panel_url(resolve(P2P).unwrap()), "index.html#/p2p");
+        assert_eq!(panel_url(resolve(PRIVACY).unwrap()), "index.html#/privacy");
         assert_eq!(panel_url(resolve(SETTINGS).unwrap()), "index.html#/settings");
         assert_eq!(panel_url(resolve(DEBUG).unwrap()), "index.html#/debug");
     }
@@ -405,6 +419,7 @@ mod tests {
         assert!(!resolve(SUGGESTIONS).unwrap().always_on_top);
         assert!(!resolve(ANCHOR).unwrap().always_on_top);
         assert!(!resolve(P2P).unwrap().always_on_top);
+        assert!(!resolve(PRIVACY).unwrap().always_on_top);
         assert!(!resolve(SETTINGS).unwrap().always_on_top);
         assert!(!resolve(DEBUG).unwrap().always_on_top);
     }

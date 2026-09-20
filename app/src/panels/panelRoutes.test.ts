@@ -20,6 +20,7 @@ test("each known panel route parses to its panel", () => {
   });
   assert.deepEqual(parsePanelRoute("#/anchor"), { kind: "panel", panel: "anchor" });
   assert.deepEqual(parsePanelRoute("#/p2p"), { kind: "panel", panel: "p2p" });
+  assert.deepEqual(parsePanelRoute("#/privacy"), { kind: "panel", panel: "privacy" });
   assert.deepEqual(parsePanelRoute("#/settings"), { kind: "panel", panel: "settings" });
   assert.deepEqual(parsePanelRoute("#/debug"), { kind: "panel", panel: "debug" });
 });
@@ -75,6 +76,7 @@ test("isPanelName accepts only the registry names", () => {
   assert.equal(isPanelName("suggestions"), true);
   assert.equal(isPanelName("anchor"), true);
   assert.equal(isPanelName("p2p"), true);
+  assert.equal(isPanelName("privacy"), true);
   assert.equal(isPanelName("settings"), true);
   assert.equal(isPanelName("debug"), true);
   assert.equal(isPanelName("Wallet"), false);
