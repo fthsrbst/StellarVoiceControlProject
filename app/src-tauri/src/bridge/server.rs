@@ -706,6 +706,53 @@ pub fn health(
     crate::health::FeatureHealth::new(HEALTH_ID, HEALTH_TITLE, MILESTONE, status, detail)
 }
 
+/// The non-prompting `anchor_signing_health` check (step W5a): can a loopback
+/// listener bind, is an owner address configured, and is the sequence-0 rule the
+/// only wallet-only path (it always is — the constant makes that explicit in the
+/// Debug panel). Never shows a prompt and never opens a browser.
+pub fn challenge_health(
+    _assets: &dyn AssetProvider,
+    owner_address: Option<&str>,
+) -> crate::health::FeatureHealth {
+    let Some(owner) = owner_address.filter(|address| !address.trim().is_empty()) else {
+        return crate::health::FeatureHealth::new(
+            ANCHOR_HEALTH_ID,
+            ANCHOR_HEALTH_TITLE,
+            ANCHOR_MILESTONE,
+            HealthStatus::Fail,
+            "No owner address is configured; set POLARIS_OWNER_ADDRESS to a testnet G address.",
+        );
+    };
+    if !crate::stellar_config::is_public_key(owner) {
+        return crate::health::FeatureHealth::new(
+            ANCHOR_HEALTH_ID,
+            ANCHOR_HEALTH_TITLE,
+            ANCHOR_MILESTONE,
+            HealthStatus::Fail,
+            "POLARIS_OWNER_ADDRESS is not a valid G... address.",
+        );
+    }
+    if tiny_http::Server::http("127.0.0.1:0").is_err() {
+        return crate::health::FeatureHealth::new(
+            ANCHOR_HEALTH_ID,
+            ANCHOR_HEALTH_TITLE,
+            ANCHOR_MILESTONE,
+            HealthStatus::Fail,
+            "Could not bind a listener on 127.0.0.1; another process may be blocking loopback.",
+        );
+    }
+    crate::health::FeatureHealth::new(
+        ANCHOR_HEALTH_ID,
+        ANCHOR_HEALTH_TITLE,
+        ANCHOR_MILESTONE,
+        HealthStatus::Ok,
+        format!(
+            "Wallet-only signing is available for {}; only sequence-0 login challenges are accepted.",
+            short(owner)
+        ),
+    )
+}
+
 /// The first bundled script asset referenced by the page HTML, if any.
 fn html_asset_path(page: &[u8]) -> Option<String> {
     let html = String::from_utf8_lossy(page);
@@ -736,6 +783,12 @@ pub const HEALTH_ID: &str = "w4b.bridge";
 pub const HEALTH_TITLE: &str = "Freighter signing bridge";
 /// The milestone this module's checks belong to.
 pub const MILESTONE: &str = "W4b";
+/// Feature-check id for the wallet-only anchor signing path (step W5a).
+pub const ANCHOR_HEALTH_ID: &str = "w5a.anchor.signing";
+/// Human title for the anchor signing health check.
+pub const ANCHOR_HEALTH_TITLE: &str = "Anchor wallet signing";
+/// The milestone the anchor signing check belongs to.
+pub const ANCHOR_MILESTONE: &str = "W5a";
 
 /// Non-prompting health command. `now_ms` is used by `FeatureHealth::new`; kept
 /// here so a future async variant shares the same timestamp source.
@@ -1142,6 +1195,22 @@ mod tests {
         let health = health(&Empty, Some(OWNER), None);
         assert_eq!(health.status, HealthStatus::Warn);
         assert!(health.detail.contains("npm run build"));
+    }
+
+    #[test]
+    fn anchor_health_checks_the_listener_and_owner_and_names_the_seq_zero_rule() {
+        let missing = challenge_health(&FakeAssets, None);
+        assert_eq!(missing.status, HealthStatus::Fail);
+        assert_eq!(missing.id, ANCHOR_HEALTH_ID);
+        assert_eq!(missing.milestone, "W5a");
+
+        let bad = challenge_health(&FakeAssets, Some("not-an-address"));
+        assert_eq!(bad.status, HealthStatus::Fail);
+
+        let ok = challenge_health(&FakeAssets, Some(OWNER));
+        assert_eq!(ok.status, HealthStatus::Ok);
+        assert!(ok.detail.contains("sequence-0"));
+        assert!(ok.checked_at > 0);
     }
 
     #[test]

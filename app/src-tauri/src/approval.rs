@@ -189,6 +189,9 @@ pub enum AuthorizeError {
     /// A `WalletOnly` request cannot be authorized from the webview; only the
     /// in-process Rust anchor path (W5) may do that.
     WalletOnly,
+    /// The in-process anchor authorization was called for a `TouchId` request;
+    /// that request must go through the real biometric prompt, not this path.
+    NotWalletOnly,
 }
 
 /// Why a denial could not be recorded.
@@ -236,6 +239,9 @@ impl AuthorizeError {
             Self::Busy => "an approval prompt is already open for this request".to_string(),
             Self::WalletOnly => {
                 "wallet-only approvals cannot be authorized from the webview".to_string()
+            }
+            Self::NotWalletOnly => {
+                "the request is not a wallet-only approval, so it needs Touch ID".to_string()
             }
         }
     }
@@ -434,11 +440,10 @@ impl ApprovalStore {
     ///
     /// The resulting request is still not webview-authorizable:
     /// [`ApprovalStore::authorize_with`] refuses `WalletOnly`, so no webview call
-    /// can flip it to `Authorized` without a real gesture.
-    ///
-    // TODO(W5): land the Rust-side anchor check before any `WalletOnly` request
-    // is released; W4b must not enable `WalletOnly`.
-    #[allow(dead_code)]
+    /// can flip it to `Authorized` without a real gesture. Only the in-process
+    /// [`ApprovalStore::authorize_wallet_only`] may authorize it, and the caller
+    /// (W5's `bridge_sign_challenge`) has proven the payload is a sequence-0
+    /// SEP-10 challenge first.
     pub(crate) fn begin_wallet_only(
         &self,
         mut request: ApprovalRequest,
@@ -611,6 +616,25 @@ impl ApprovalStore {
             },
         };
         let payload = self.finish_authorize(id, approved)?;
+        Ok(payload.payload_hash)
+    }
+
+    /// Authorizes a `WalletOnly` request **in process**, with no biometric
+    /// prompt. This is the anchor milestone's (W5) path for a payload Rust has
+    /// already proven is safe to sign without Touch ID — a SEP-10 challenge with
+    /// sequence number `0`, which can never be applied on-chain.
+    ///
+    /// Fail-closed by construction: it refuses any request whose mode is not
+    /// `WalletOnly`, so it can never be used to skip the prompt for a normal
+    /// (value-moving) request. It is deliberately an inherent method, not a Tauri
+    /// command, so the webview can never reach it.
+    pub(crate) fn authorize_wallet_only(&self, id: &str) -> Result<String, AuthorizeError> {
+        let (plan, _guard) = self.prepare_authorize(id)?;
+        if plan.mode != ApprovalMode::WalletOnly {
+            let _ = self.finish_authorize(id, false);
+            return Err(AuthorizeError::NotWalletOnly);
+        }
+        let payload = self.finish_authorize(id, true)?;
         Ok(payload.payload_hash)
     }
 
@@ -797,10 +821,13 @@ impl From<AuthorizeError> for ApprovalCommandError {
             AuthorizeError::NotFound | AuthorizeError::NotPending { .. } => {
                 ApprovalErrorKind::NotPending
             }
-            // `Busy` and a webview attempt at `WalletOnly` are transient /
-            // internal conditions with no dedicated kind; `failed` is the
-            // fail-closed bucket, never mistaken for a benign state.
-            AuthorizeError::Busy | AuthorizeError::WalletOnly => ApprovalErrorKind::Failed,
+            // `Busy`, a webview attempt at `WalletOnly` and the in-process
+            // `NotWalletOnly` guard are transient / internal conditions with no
+            // dedicated kind; `failed` is the fail-closed bucket, never mistaken
+            // for a benign state.
+            AuthorizeError::Busy
+            | AuthorizeError::WalletOnly
+            | AuthorizeError::NotWalletOnly => ApprovalErrorKind::Failed,
         };
         Self::new(kind, error.detail())
     }
@@ -1130,6 +1157,36 @@ mod tests {
     }
 
     #[test]
+    fn authorize_wallet_only_authorizes_a_wallet_only_request_and_refuses_others() {
+        let store = ApprovalStore::new();
+        let outcome = store.begin_wallet_only(request(XDR_ABC)).unwrap();
+        assert_eq!(
+            store.authorize_wallet_only(&outcome.request.id).unwrap(),
+            XDR_ABC_HASH
+        );
+        assert_eq!(
+            store.status(&outcome.request.id).unwrap().state,
+            ApprovalState::Authorized
+        );
+        // Once authorized in process, the gate's only release path works.
+        let released = store.take_authorized(&outcome.request.id).unwrap();
+        assert_eq!(released.unsigned_xdr, XDR_ABC);
+
+        // A TouchId request must never be authorized by the in-process path: it
+        // needs the real prompt.
+        let store = ApprovalStore::new();
+        let touch = store.begin(request(XDR_ABC)).unwrap();
+        assert_eq!(
+            store.authorize_wallet_only(&touch.request.id),
+            Err(AuthorizeError::NotWalletOnly)
+        );
+        assert_eq!(
+            store.status(&touch.request.id).unwrap().state,
+            ApprovalState::Pending
+        );
+    }
+
+    #[test]
     fn unknown_mode_is_rejected_by_deserialization() {
         let json = format!(
             r#"{{"payloadHash":"{XDR_ABC_HASH}","unsignedXdr":"{XDR_ABC}","summary":{{"title":"t","lines":[],"estimatedFee":"0"}},"intent":{{"kind":"send","asset":"XLM","amount":"1"}},"mode":"magic"}}"#
@@ -1392,6 +1449,10 @@ mod tests {
         assert_eq!(kind(AuthorizeError::Busy.into()), ApprovalErrorKind::Failed);
         assert_eq!(
             kind(AuthorizeError::WalletOnly.into()),
+            ApprovalErrorKind::Failed
+        );
+        assert_eq!(
+            kind(AuthorizeError::NotWalletOnly.into()),
             ApprovalErrorKind::Failed
         );
         assert_eq!(

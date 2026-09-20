@@ -70,6 +70,8 @@ pub fn run() {
             bridge::commands::bridge_sign,
             bridge::commands::bridge_selftest,
             bridge::commands::bridge_health,
+            bridge::commands::bridge_sign_challenge,
+            bridge::commands::anchor_signing_health,
         ])
         // Step W0: a panel's close button hides it instead of quitting the app
         // (the overlay's `main` window is never closed, so the close handler is

@@ -21,6 +21,12 @@
 //!   sequence is not exactly `0`: a sequence-0 transaction can never be applied
 //!   on-chain, so the self-test cannot sign a real transaction.
 //! * [`commands::bridge_health`] — the non-prompting health check.
+//! * [`commands::bridge_sign_challenge`] — wallet-only signing of a SEP-10 login
+//!   challenge (step W5a). It refuses any envelope that is not a sequence-0,
+//!   anchor-signed challenge before the gate is touched, so no Touch ID is needed
+//!   (a sequence-0 transaction can never be applied on-chain) and no real payment
+//!   can reach the browser without a prompt.
+//! * [`commands::anchor_signing_health`] — the non-prompting W5a health check.
 //!
 //! The XDR is verified without an XDR crate ([`verify`]) and the `G...` address
 //! is decoded without a StrKey crate ([`strkey`]); both are deliberately small so
