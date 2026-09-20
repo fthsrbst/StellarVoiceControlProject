@@ -178,3 +178,120 @@ EXIT=2
 - Horizon was unreachable in this environment, so the live path was exercised
   through the labelled dummy-sequence fallback; the online sequence load was not
   observed.
+
+---
+
+## Fix — W4a-fix: live Horizon path crashed (`sequence must be of type string`)
+
+- **Date:** 2026-09-20
+- **Worker/Agent:** opencode worker (deepseek-v4.1-flash)
+- **Branch/Worktree:** `feat/w4a-freighter-bridge-page` / `.worktrees/w4a-bridge-page`
+
+### Root cause
+
+`buildUnsignedPayload` did `sequence = account.sequenceNumber;`. On a Horizon
+`AccountResponse` (`node_modules/@stellar/stellar-sdk/lib/esm/horizon/account_response.d.ts:57`)
+`sequenceNumber()` is a **method**, so a function was passed to `new Account(...)`,
+which threw `sequence must be of type string`. The offline placeholder path never
+touched it, so `--selftest` stayed green.
+
+### What changed (`scripts/bridge-fixture.mjs` only)
+
+1. **Method is invoked; bad types are loud.** New `accountSequence(account)`
+   calls `sequenceNumber()` when it is a function, then requires a numeric
+   string. The tracker/loader call is wrapped in its own `try/catch`, so **only a
+   genuine load failure** becomes the labelled offline placeholder; a returned
+   account with a wrong-typed sequence throws instead of silently degrading.
+2. **Injectable loader.** `buildUnsignedPayload({ …, loadAccount })` defaults to
+   `loadAccountFromHorizon({ owner, horizonUrl })` (the old 4 s-timeout Horizon
+   call) and is exported; `startFixtureServer` threads it through.
+3. **Top-level run guarded** (`path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)`)
+   so the module can be imported by a test without starting a server.
+4. **Alias parsing (found while running the task's live command).** The supplied
+   value `POLARIS_ALIASES=acc2=GB25…` made `Operation.payment` throw
+   `destination is invalid`, because `parseAliases` kept the `name=` prefix.
+   `parseAliases` now strips an optional `name=` from each comma-separated entry
+   (bare `G…` addresses still work).
+
+### Regression test — `scripts/bridge-fixture.test.mjs` (new)
+
+Three cases required by the task, plus one for aliases: the method-based
+`AccountResponse` produces a transaction sequence of `value + 1` with
+`offline === false`; a rejecting loader yields the labelled placeholder; a
+wrong-typed sequence rejects with `sequenceNumber must be a numeric string`
+(never the placeholder); `parseAliases` strips `name=`. Reverting the fix to the
+old `sequence = account.sequenceNumber` was run once and makes the suite fail
+with the original `sequence must be of type string` — so the test is a real
+regression guard.
+
+### Real output
+
+```
+$ node --test scripts/bridge-fixture.test.mjs        # exit 0
+✔ loads the live sequence from a method-based Horizon account
+✔ falls back to the labelled offline placeholder when the loader rejects
+✔ a wrong-typed sequence is an error, never a silent offline fallback
+✔ parses bare and name-prefixed alias entries down to addresses
+ℹ tests 4
+ℹ pass 4
+ℹ fail 0
+
+$ npm test -w @polaris/app                            # exit 0 (unchanged)
+ℹ tests 36
+ℹ pass 36
+ℹ fail 0
+
+$ node scripts/bridge-fixture.mjs --selftest          # exit 0
+bridge:fixture: selftest passed ✓
+```
+
+Live run, exact task command (started in the worktree background, log to
+`.tmp-fixture.log`, then killed by PID):
+
+```
+$ POLARIS_OWNER_ADDRESS=GAJW5V7VXHIRTJBGNVYTGXJ6CLDM7IEIPAYD3XLKKTKJKPRBYOTAC25A \
+  POLARIS_ALIASES=acc2=GB25QEDATQREAQQHBW3DAGLOZ3EURS44URZETXLLREPPYCX2ABCORNLV \
+  node --env-file-if-exists=.env scripts/bridge-fixture.mjs
+
+bridge:fixture: open this URL in your browser:
+  http://127.0.0.1:52738/sign?t=<token-redacted>
+bridge:fixture: sequence loaded from Horizon.
+bridge:fixture: waiting for the page to post a result…
+```
+
+`GET /sign/payload?t=<token>` (JSON pasted without the token):
+
+```json
+{
+  "xdr": "AAAAAgAAAAATbtf1udEZpCZtcTNdPhLGz6CIeDA93WpU1JU+IcOmAQAAAGQASL86AAAAAQAAAAEAAAAAAAAAAAAAAABqryY6AAAAAAAAAAEAAAAAAAAAAQAAAAB12BBgnCJAQgcNtjAZbs7JSMucpHJJ3WuJHvwK+gBE6AAAAAAAAAAAAJiWgAAAAAAAAAAA",
+  "networkPassphrase": "Test SDF Network ; September 2015",
+  "address": "GAJW5V7VXHIRTJBGNVYTGXJ6CLDM7IEIPAYD3XLKKTKJKPRBYOTAC25A",
+  "payloadHash": "b07b5d9ab2845aabc07c17dd2a5fb4fea9a22e88b90cc8510d00c7766ca94d53",
+  "summary": {
+    "title": "Sign a testnet payment",
+    "lines": [
+      "From GAJW5V7VXHIRTJBGNVYTGXJ6CLDM7IEIPAYD3XLKKTKJKPRBYOTAC25A",
+      "To GB25QEDATQREAQQHBW3DAGLOZ3EURS44URZETXLLREPPYCX2ABCORNLV",
+      "Amount 1 XLM (native)",
+      "Sequence 20476454152175616 loaded from Horizon"
+    ],
+    "estimatedFee": "0.0000100 XLM",
+    "explorerUrl": "https://stellar.expert/explorer/testnet/account/GAJW5V7VXHIRTJBGNVYTGXJ6CLDM7IEIPAYD3XLKKTKJKPRBYOTAC25A"
+  }
+}
+```
+
+The node process was stopped by its own PID; `.tmp-fixture.log`/`.tmp-fixture.pid`
+were deleted. No browser was opened and nothing was submitted. **This also
+retires the earlier "online sequence load was not observed" caveat.**
+
+### Blocked / handoff
+
+- **Docs now slightly stale:** `docs/freighter-bridge.md` §5 still documents
+  `POLARIS_ALIASES` as "comma-separated G addresses". It now also accepts
+  `name=G…`. Updating the docs is outside this task's file scope.
+- `backlog.md` / `sprints.md` were **not** touched (explicitly outside scope);
+  the coordinator should add the index row / checklist item.
+- Real Freighter signing, and the rendered bridge UI, remain unverified (need a
+  human with Freighter on Testnet).
+
