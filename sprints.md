@@ -229,8 +229,8 @@
 
 ## Milestone 4 — Delivery / Presentation 🔲
 > Deadline: 20 Sep 12:00. Bonuses (passkey wallet, P2P escrow, developer mode) ONLY after M4 items are done.
-- [ ] README refreshed to reflect current codebase (constitution requirement)
-- [ ] Demo video recorded + pitch deck
+- [x] README refreshed to reflect current codebase (constitution requirement)
+- [ ] Demo video recorded + pitch deck; demo script + pitch text written (`docs/demo-script.md`, `docs/pitch.md`, T1-demo)
 - [ ] Docs synced: notes.md, backlog reports, docs/reports/INDEX.md, sprints.md all up to date
 - [ ] (bonus, if everything above is done) passkey wallet / P2P escrow / developer mode
 - [ ] (2026-09-20, W8a) P2P escrow contract `polaris_p2p_escrow`: built, 20 tests, testnet-deployed `CBMXLTX…` — TS client + order-book UI pending review
