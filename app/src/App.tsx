@@ -17,6 +17,7 @@ import {
   isPaymentStage,
   noticeLabel,
   reduceTurnSession,
+  shouldSurfaceOutcome,
   stageLabel,
   stageWatchdog,
   TOTAL_WATCHDOG_MS,
@@ -232,8 +233,13 @@ export default function App() {
           };
           void executeApprovedIntent(intent, { onStage })
             .then((outcome) => {
-              if (disposed || !isCurrentTurn(sessionRef.current, turnId)) return;
-              if (outcome.status === "executed" && outcome.txHash) {
+              if (disposed) return;
+              // M1: a non-submitted stale result is still dropped. W4b-2: a tx
+              // that actually reached the network is always surfaced, even if a
+              // watchdog settled the turn as failed first (MAJOR-1).
+              const submitted = outcome.status === "executed" && outcome.txHash !== undefined;
+              if (!shouldSurfaceOutcome(sessionRef.current, turnId, submitted)) return;
+              if (submitted) {
                 // W4b: the signed transaction reached the network. Announce the
                 // real result (not the pre-approval confirmation) and let the
                 // real `speech_status` stream end the turn.

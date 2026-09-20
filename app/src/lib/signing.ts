@@ -27,7 +27,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import type { ExecutionOutcome } from "@polaris/agent";
-import { submitSignedTx, type SubmitResult } from "@polaris/stellar";
+import type { SubmitResult } from "@polaris/stellar";
 
 import type { InvokeFn } from "./approval.ts";
 import type { PaymentStage } from "./turnSession.ts";
@@ -60,9 +60,18 @@ export type BridgeFailureCode =
 
 export type BridgeOutcome = BridgeSigned | BridgeFailure;
 
-/** True for the success arm; the `ok` discriminant is the only discriminator. */
+/**
+ * True for the success arm — and only when the payload is actually usable. A
+ * malformed success (`ok: true` without a string `signedXdr`/`txHash`) is not
+ * treated as signed, so the caller labels it instead of throwing on
+ * `txHash.toLowerCase()` (W4b-2 MINOR-1).
+ */
 export function isBridgeSigned(value: BridgeOutcome): value is BridgeSigned {
-  return value.ok === true;
+  return (
+    value.ok === true &&
+    typeof value.signedXdr === "string" &&
+    typeof value.txHash === "string"
+  );
 }
 
 /**
@@ -106,6 +115,8 @@ function submissionLabel(message: string): string {
 export interface SigningDeps {
   invoke: InvokeFn;
   submit: (signedXdr: string, expectedXdr?: string) => Promise<SubmitResult>;
+  /** Builds the canonical testnet link for a hash; injectable for tests. */
+  explorerTxUrl?: (hash: string) => string;
   /** Emits `tx_submitted` to the webview. Routed to the Rust command by default. */
   emitSubmitted: (hash: string, explorerUrl: string) => Promise<void> | void;
   /**
@@ -116,10 +127,19 @@ export interface SigningDeps {
   onStage?: (stage: PaymentStage) => void;
 }
 
-/** Default seams: the real Tauri invoke, the real submitter and emitter. */
+/**
+ * Default seams: the real Tauri invoke, the real submitter and emitter. The
+ * chain SDK is imported **lazily** inside `submit`, so `@polaris/stellar` stays
+ * out of the shell's eager bundle (W4b-2 MAJOR-2): a turn that never signs pays
+ * for neither the SDK nor the bundle weight.
+ */
 export const defaultSigningDeps: SigningDeps = {
   invoke,
-  submit: (signedXdr, expectedXdr) => submitSignedTx(signedXdr, expectedXdr),
+  submit: async (signedXdr, expectedXdr) => {
+    const { submitSignedTx } = await import("@polaris/stellar");
+    return submitSignedTx(signedXdr, expectedXdr);
+  },
+  explorerTxUrl,
   emitSubmitted: async (hash, explorerUrl) => {
     await invoke("tx_submitted_emit", { hash, explorerUrl });
   },
@@ -163,7 +183,11 @@ export async function signAndSubmit(
   }
 
   if (!isBridgeSigned(bridge)) {
-    return fail(outcome, BRIDGE_LABELS[bridge.code], bridge.message);
+    // A malformed success (`ok: true` missing a string field) is not signed:
+    // label it instead of letting `txHash.toLowerCase()` throw (MINOR-1).
+    const failure = bridge as Partial<BridgeFailure>;
+    const code = failure.code ?? "error";
+    return fail(outcome, BRIDGE_LABELS[code], failure.message ?? "malformed bridge response");
   }
 
   // F1: the signed envelope is on its way to Horizon.
@@ -186,7 +210,8 @@ export async function signAndSubmit(
     );
   }
 
-  const explorerUrl = submitted.explorerUrl || explorerTxUrl(submitted.hash.toLowerCase());
+  const buildExplorerUrl = deps.explorerTxUrl ?? explorerTxUrl;
+  const explorerUrl = submitted.explorerUrl || buildExplorerUrl(submitted.hash.toLowerCase());
   try {
     await deps.emitSubmitted(submitted.hash.toLowerCase(), explorerUrl);
   } catch (error) {

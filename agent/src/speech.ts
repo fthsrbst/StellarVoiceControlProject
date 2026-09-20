@@ -6,11 +6,14 @@
  * command. Rust never formats an intent: there is exactly one place that turns a
  * structured result into words.
  *
- * Two rules from the task drive the shape below:
+ * Two rules drive the shape below:
  *
- * * A produced intent is spoken as a short **confirmation sentence** — the user
- *   hears what is about to happen and is asked to confirm. The raw JSON is never
- *   read aloud.
+ * * A produced intent still has a short **confirmation sentence** built here,
+ *   and the offline speak-preview path reads it aloud. The desktop shell no
+ *   longer speaks it before approval (W4b): it waits for the transaction to
+ *   reach the network and then says [`submittedSentence`] — or
+ *   [`failureSentence`] on a refusal — so the user hears the real outcome, not a
+ *   pre-approval prompt. The raw JSON is never read aloud.
  * * A turn without an intent is spoken as its **answer** (the clarification the
  *   model asked for, e.g. for off-topic or ambiguous input). Internal errors are
  *   *not* spoken at all; they already surface as a short UI label.

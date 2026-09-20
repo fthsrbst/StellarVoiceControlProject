@@ -9,6 +9,10 @@
  * Read-only: it never signs, submits or moves funds. A missing command on a
  * branch without W1 degrades to `warn` instead of failing the panel. The
  * decision logic lives in `@/debug/checkHelpers` (unit-tested).
+ *
+ * The chain package is imported **inside** `run`, not at module scope: the check
+ * registry globs every check eagerly, so a static import here would pull the
+ * whole Stellar SDK into the shell's eager bundle (W4b-2 MAJOR-2).
  */
 import {
   DEFAULT_RECIPIENT_ALIAS,
@@ -18,7 +22,6 @@ import {
 import { getStellarConfigIfAvailable } from "@/debug/commands.ts";
 import { errorDetail, makeResult } from "@/debug/runner.ts";
 import type { FeatureCheck } from "@/debug/types.ts";
-import { parseAliasBook } from "@polaris/stellar";
 
 /** The live check. Read-only; safe for the panel's auto-run. */
 export default {
@@ -43,6 +46,7 @@ export default {
       let aliasBookResolved = true;
       let recipientResolved = false;
       try {
+        const { parseAliasBook } = await import("@polaris/stellar");
         const committed = (await import("../../../../stellar/config/aliases.json")).default;
         const { book } = parseAliasBook({ ...committed, ...config.aliases });
         // `resolveAlias` is not re-exported by the package root; the book is a

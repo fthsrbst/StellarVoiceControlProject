@@ -21,13 +21,15 @@
  *
  * ## Event + poll
  *
- * The gate also emits `approval_result` on the typed event stream. A listener is
- * attached **before** `approval_begin`, so a decision that lands between the
- * begin and the first poll is not missed; a poll of `approval_status` runs
- * concurrently as the fallback, covering a dropped event or a gate that only
- * exposes the command. The first terminal observation wins; later ones are
- * ignored. The whole wait is bounded by [`APPROVER_TIMEOUT_MS`], after which the
- * answer is a fail-closed `false`.
+ * The gate also emits `approval_result` on the typed event stream. As the wait
+ * begins, a listener is attached so a decision that lands between the begin and
+ * the first poll is not missed; a poll of `approval_status` runs concurrently as
+ * the fallback, covering a dropped event or a gate that only exposes the
+ * command. The bounded wait is armed **before** the card is opened and opening
+ * is fire-and-forget, so a hanging `open` can neither delay nor unbind the
+ * approval. The first terminal observation wins; later ones are ignored. The
+ * whole wait is bounded by [`APPROVER_TIMEOUT_MS`], after which the answer is a
+ * fail-closed `false`.
  *
  * ## No secrets
  *
@@ -250,14 +252,18 @@ export function createTouchIdApprover(deps: ApproverDeps): IntentApprover {
         deps.invoke,
       );
 
+      // Arm the bounded wait (deadline + subscription + first poll) before the
+      // card is opened, so the listener cannot miss an early decision.
+      const decision = waitForDecision(id, request.payloadHash, deps);
+
       // Open the card only after the gate accepted the request, so the panel's
-      // hydration always finds something. A failed open is not fatal: the gate
-      // still holds the request and the wait below still applies.
-      await deps.open("approval").catch((error: unknown) => {
+      // hydration always finds something. Opening is fire-and-forget: a hanging
+      // or failed opener must never delay or unbind the wait above.
+      void deps.open("approval").catch((error: unknown) => {
         console.warn("could not open the approval panel", error);
       });
 
-      const status = await waitForDecision(id, request.payloadHash, deps);
+      const status = await decision;
       if (status === null) {
         webLog("error", `approval timed out after ${APPROVER_TIMEOUT_MS} ms`, true);
         return { approved: false, approvalId: id, reason: TIMEOUT_REASON };

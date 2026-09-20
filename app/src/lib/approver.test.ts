@@ -178,6 +178,55 @@ test("timeout: no terminal status before the deadline is a fail-closed refusal",
   assert.match(decision.reason ?? "", /timed out/);
 });
 
+test("a hanging open cannot unbind the wait: the deadline still fires", async () => {
+  const { invoke } = mockInvoke((command) =>
+    command === "approval_begin" ? "apr_1" : status("pending"),
+  );
+  const events = fakeEvents();
+  const timers = fakeTimers();
+  const promise = createTouchIdApprover({
+    invoke,
+    // The card opener never resolves; the approval must not wait on it.
+    open: () => new Promise<never>(() => {}),
+    subscribe: events.subscribe,
+    ...timers,
+  }).approve(REQUEST);
+
+  await flush();
+  timers.advance(131_000);
+  const decision = await promise;
+
+  assert.equal(decision.approved, false);
+  assert.match(decision.reason ?? "", /timed out/);
+});
+
+test("approval takes 90 s: the gate still decides, the deadline does not fire", async () => {
+  let state: ApprovalStatus["state"] = "pending";
+  const { invoke } = mockInvoke((command) => {
+    if (command === "approval_begin") return "apr_1";
+    return status(state);
+  });
+  const events = fakeEvents();
+  const timers = fakeTimers();
+  const promise = createTouchIdApprover({
+    invoke,
+    open: async () => {},
+    subscribe: events.subscribe,
+    ...timers,
+  }).approve(REQUEST);
+
+  await flush();
+  // 90 s of Touch ID: the approval ceiling (140 s) and this module's 130 s
+  // deadline are both still in the future, so the gate decides the outcome.
+  timers.advance(90_000);
+  state = "authorized";
+  events.emit({ payloadHash: "hash-1", approved: true });
+
+  const decision = await promise;
+  assert.equal(decision.approved, true);
+  assert.equal(decision.approvalId, "apr_1");
+});
+
 test("begin failure: a rejected approval_begin propagates (fail closed)", async () => {
   const events = fakeEvents();
   const timers = fakeTimers();

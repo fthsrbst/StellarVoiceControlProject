@@ -168,3 +168,20 @@ New suites: `app/src/lib/approver.test.ts` (10), `app/src/lib/signing.test.ts`
 - W4b-1 (Rust) lands `bridge_sign`/`bridge_selftest`/`bridge_health`; then run the
   two Debug actions (“Test Touch ID”, “Test Freighter signing”) and one real
   acc1→acc2 XLM payment end to end.
+
+## W4b-2 review applied (branch `fix/w4b2-review`, 2026-09-20)
+
+- MAJOR-1: F1 already swaps the `thinking` watchdog (now 30 s) for the 140 s
+  approval ceiling at `awaiting_approval`; added `shouldSurfaceOutcome` so a **submitted**
+  tx is surfaced even if a watchdog settled the turn as failed ("approval takes
+  90 s" test).
+- MAJOR-2: `signing.ts` now imports `@polaris/stellar` lazily (type-only
+  `SubmitResult`); `checks/submit.ts`/`network.ts` import it inside `run`. The SDK
+  is still preloaded by later W5/W6 modules — see `backlog/w4b2-fix.md`.
+- MINOR-1/2: `isBridgeSigned` validates `txHash`/`signedXdr` (labelled failure, no
+  throw); corrected the `tx_submitted_emit` doc (shape check, not proof) and
+  labelled the Wallet panel hash "reported by the app".
+- MINOR-3/NIT: refreshed `chain.ts`/`speech.ts`/`approver.ts` comments; armed the
+  approver deadline before awaiting `deps.open`. Base is behind `integration/wallet`
+  (pre-existing `bridge/commands.rs` test-compile fix lives there); only `cargo
+  check`/`clippy` run here.

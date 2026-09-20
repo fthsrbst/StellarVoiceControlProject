@@ -10,9 +10,11 @@
 //!
 //! The alternative (have Rust submit) would move Horizon access into the shell
 //! and duplicate the chain lane's hash-with-expected-XDR check. Instead, the
-//! webview stays the submitter and Rust only re-validates the two values the
-//! event carries before broadcasting them, so a compromised or buggy caller
-//! cannot put an arbitrary string on the `tx_submitted` channel the UI trusts.
+//! webview stays the submitter and Rust only re-validates the **shape** of the
+//! two values before broadcasting them. This does *not* prove a submission
+//! happened: any caller can emit a well-formed hash and its canonical link, so
+//! the UI must treat `tx_submitted` as an app-reported claim (the Wallet panel
+//! labels it "reported by the app"), not as independent evidence.
 //!
 //! ## Validation (fail-closed)
 //!
@@ -89,11 +91,13 @@ pub fn validate(hash: &str, explorer_url: &str) -> Result<(), TxEventError> {
     Ok(())
 }
 
-/// Emits the `tx_submitted` event after validating the pair.
+/// Emits the `tx_submitted` event after validating the pair's shape.
 ///
-/// The webview calls this once submission succeeded; the event is what the UI
-/// (and the Debug panel's tail) records. A refusal never emits and returns the
-/// typed error so the caller can label it.
+/// The webview calls this once submission succeeded, but the check is syntactic
+/// only (see the module docs): a caller that invents a hash can still emit it.
+/// The event is UI display input ("reported by the app"), not proof; the Debug
+/// panel's tail records it as such. A refusal never emits and returns the typed
+/// error so the caller can label it.
 #[tauri::command]
 pub fn tx_submitted_emit(
     app: AppHandle,

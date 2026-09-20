@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { StellarConfig } from "@polaris/interfaces";
+import type { PolarisEvent, StellarConfig } from "@polaris/interfaces";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -10,6 +10,7 @@ import {
   type PaymentsFetchResult,
 } from "@/lib/history";
 import { getStellarConfig } from "@/lib/stellarConfig";
+import { usePolarisEvents } from "@/panels/events";
 import { PanelShell } from "@/panels/PanelShell";
 import { deriveWalletView, formatTransactionTime, type WalletView } from "@/panels/wallet/walletModel";
 import committedAliases from "../../../stellar/config/aliases.json";
@@ -132,6 +133,19 @@ export function WalletPanel() {
   const [payments, setPayments] = useState<PaymentsFetchResult | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [copied, setCopied] = useState(false);
+  // The most recent `tx_submitted` the app reported this session. It is display
+  // input only — the event is shape-validated, not proof — so it is labelled as
+  // reported by the app rather than as a verified Horizon fact (W4b-2 MINOR-2).
+  const [lastSubmitted, setLastSubmitted] = useState<{ hash: string; explorerUrl: string } | null>(
+    null,
+  );
+
+  const onEvent = useCallback((event: PolarisEvent) => {
+    if (event.type === "tx_submitted") {
+      setLastSubmitted({ hash: event.hash, explorerUrl: event.explorerUrl });
+    }
+  }, []);
+  usePolarisEvents(onEvent);
 
   useEffect(() => {
     let cancelled = false;
@@ -209,6 +223,25 @@ export function WalletPanel() {
             {refreshing ? "Refreshing…" : "Refresh"}
           </Button>
         </div>
+
+        {lastSubmitted ? (
+          <Section title="Latest transaction (reported by the app)">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <code className="selectable break-all font-mono">{lastSubmitted.hash}</code>
+              <a
+                className="shrink-0 text-polaris-accent underline-offset-2 hover:underline"
+                href={lastSubmitted.explorerUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Explorer
+              </a>
+            </div>
+            <p className="text-[10px] text-polaris-muted">
+              Reported by the signing flow this session; the explorer is authoritative.
+            </p>
+          </Section>
+        ) : null}
 
         {configured && view.ownerAddress === null ? (
           <p className="rounded-lg border border-polaris-line bg-polaris-panel/60 px-3 py-2 text-xs text-polaris-muted">
